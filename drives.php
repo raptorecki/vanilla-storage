@@ -46,7 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_drive'])) {
             exit();
         } catch (\PDOException $e) {
             $pdo->rollBack();
-            $add_form_error = "Error adding drive: " . $e->getMessage();
+            log_error("Error adding drive: " . $e->getMessage()); // Log the detailed error
+            $add_form_error = "An unexpected error occurred while adding the drive. Please try again."; // Generic message for the user
         }
     }
 }

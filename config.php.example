@@ -4,7 +4,7 @@ return [
         'host' => 'localhost',
         'name' => 'storage',
         'user' => 'storage',
-        'pass' => 'rb7GKWTp!*dNTUu7',
+        'pass' => 'secretpass',
         'charset' => 'utf8mb4'
     ]
 ];

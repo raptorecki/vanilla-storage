@@ -100,7 +100,8 @@ try {
     $stats['drives_least_free'] = $pdo->query($drive_usage_query . " ORDER BY free_space_bytes ASC LIMIT 5")->fetchAll();
 
 } catch (\PDOException $e) {
-    $error_message = "Database Error: " . $e->getMessage();
+    log_error("Database Error in stats.php: " . $e->getMessage());
+    $error_message = "An unexpected database error occurred while fetching statistics. Please try again.";
 }
 ?>
 

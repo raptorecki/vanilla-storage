@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/helpers/error_logger.php';
 require 'header.php';
 ?>
 <!-- The main content for index.php starts here, header.php has already been included -->

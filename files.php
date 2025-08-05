@@ -107,7 +107,8 @@ try {
         $files = $stmt->fetchAll();
     }
 } catch (\PDOException $e) {
-    $error_message = "Database Error: " . $e->getMessage();
+    $error_message = "An unexpected error occurred while searching for files. Please try again.";
+    log_error("Database Error in files.php: " . $e->getMessage());
 }
 ?>
 

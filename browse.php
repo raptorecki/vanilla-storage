@@ -5,7 +5,9 @@ require 'header.php';
 // --- Parameter Handling ---
 $drive_id = filter_input(INPUT_GET, 'drive_id', FILTER_VALIDATE_INT);
 if (!$drive_id) {
-    die("Invalid Drive ID provided.");
+    $_SESSION['flash_message'] = ['type' => 'error', 'text' => 'Invalid Drive ID provided.'];
+    header('Location: drives.php');
+    exit();
 }
 
 // Sanitize and normalize the path to prevent directory traversal attacks
@@ -24,7 +26,9 @@ try {
     $drive_info = $stmt->fetch();
 
     if (!$drive_info) {
-        die("Drive with the specified ID was not found.");
+        $_SESSION['flash_message'] = ['type' => 'error', 'text' => 'Drive with the specified ID was not found.'];
+        header('Location: drives.php');
+        exit();
     }
 
     // 2. Get File/Directory Listing for the current path
@@ -47,7 +51,8 @@ try {
     $files = $stmt->fetchAll();
 
 } catch (\PDOException $e) {
-    $error_message = "Database Error: " . $e->getMessage();
+    log_error("Database Error in browse.php: " . $e->getMessage());
+    $error_message = "An unexpected database error occurred. Please try again.";
 }
 
 /**

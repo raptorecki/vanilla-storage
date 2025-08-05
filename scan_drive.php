@@ -17,6 +17,7 @@ if (php_sapi_name() !== 'cli') {
 }
 
 require_once 'database.php';
+require_once 'helpers/error_logger.php';
 
 
 // --- Argument Parsing ---
@@ -123,7 +124,8 @@ try {
         }
     }
 } catch (Exception $e) {
-    echo "Error during drive verification: " . $e->getMessage() . "\n";
+    log_error("Error during drive verification: " . $e->getMessage());
+    echo "Error during drive verification. Check logs for details.\n";
     exit(1);
 }
 
