@@ -101,6 +101,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
         }
         .flash-message {
             padding: 15px; border-radius: 5px; margin-bottom: 20px; color: #ffffff;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+            font-size: 1.1em;
         }
         .flash-message.success {
             background-color: #1a5d2b; border: 1px solid #30a54a;
