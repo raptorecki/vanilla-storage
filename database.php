@@ -6,11 +6,13 @@
  * It will terminate with an error message if the connection fails.
  */
 
-$dbHost = 'localhost';
-$dbName = 'storage';
-$dbUser = 'storage';
-$dbPass = 'rb7GKWTp!*dNTUu7';
-$charset = 'utf8mb4';
+$config = require_once __DIR__ . '/config.php';
+
+$dbHost = $config['db']['host'];
+$dbName = $config['db']['name'];
+$dbUser = $config['db']['user'];
+$dbPass = $config['db']['pass'];
+$charset = $config['db']['charset'];
 
 // --- Data Source Name (DSN) for PDO ---
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=$charset";
@@ -26,5 +28,7 @@ try {
 } catch (\PDOException $e) {
     // If the database connection fails, we can't do anything.
     // Die and show a simple error message, consistent with the app's style.
-    die("Database Connection Failed: " . $e->getMessage());
+    $_SESSION['flash_message'] = ['text' => "Database Connection Failed: " . $e->getMessage(), 'type' => 'error'];
+    header('Location: index.php');
+    exit();
 }

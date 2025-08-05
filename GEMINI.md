@@ -9,6 +9,10 @@
 
 - Currently no particular instructions.
 
+## Code Control:
+
+- Github is used for code control. Always include comments and documentation for code control.
+
 ## Specific Components: 
 
 - index.php - Landing page
