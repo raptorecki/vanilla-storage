@@ -192,7 +192,7 @@ try {
                     <td><?= !empty($drive['pair_id']) ? '<a href="?search=' . htmlspecialchars($drive['pair_name'] ?? '') . '">' . htmlspecialchars($drive['pair_name'] ?? 'ID: ' . $drive['pair_id']) . '</a>' : '—' ?></td>
                     <td><?= htmlspecialchars($drive['date_added']) ?></td>
                     <td><?= htmlspecialchars($drive['date_updated']) ?></td>
-                    <td><a href="edit_drive.php?id=<?= htmlspecialchars($drive['id']) ?>">Edit</a></td>
+                    <td><a href="edit_drive.php?id=<?= htmlspecialchars($drive['id']) ?>">Edit</a> | <a href="delete_drive.php?id=<?= htmlspecialchars($drive['id']) ?>" onclick="return confirm('Are you sure you want to delete this drive?');">Delete</a></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
