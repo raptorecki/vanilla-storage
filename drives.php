@@ -157,7 +157,7 @@ try {
                     'vendor' => 'Vendor', 'model' => 'Model', 'model_number' => 'Model No.', 'size' => 'Size', 'serial' => 'Serial', 'firmware' => 'Firmware',
                     'smart' => 'SMART', 'summary' => 'Summary', 'dead' => 'Dead', 'online' => 'Online', 'offsite' => 'Offsite',
                     'encrypted' => 'Encrypted', 'empty' => 'Empty', 'filesystem' => 'Filesystem', 'pair_name' => 'Paired With',
-                    'date_added' => 'Added', 'date_updated' => 'Last Scanned'
+                    'date_added' => 'Added', 'date_updated' => 'Last Scanned', 'actions' => 'Actions'
                 ];
                 foreach ($headers as $col => $title):
                     $is_sorted_column = ($sort_column === $col);
@@ -192,6 +192,7 @@ try {
                     <td><?= !empty($drive['pair_id']) ? '<a href="?search=' . htmlspecialchars($drive['pair_name'] ?? '') . '">' . htmlspecialchars($drive['pair_name'] ?? 'ID: ' . $drive['pair_id']) . '</a>' : '—' ?></td>
                     <td><?= htmlspecialchars($drive['date_added']) ?></td>
                     <td><?= htmlspecialchars($drive['date_updated']) ?></td>
+                    <td><a href="edit_drive.php?id=<?= htmlspecialchars($drive['id']) ?>">Edit</a></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
