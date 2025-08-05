@@ -1,5 +1,7 @@
 <?php
-require 'header.php';
+session_start(); // Start the session to handle flash messages
+require_once 'database.php';
+require_once __DIR__ . '/helpers/error_logger.php';
 
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     $_SESSION['flash_message'] = ['type' => 'error', 'text' => 'Invalid drive ID.'];
@@ -50,6 +52,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_delete'])) {
         exit();
     }
 }
+
+require 'header.php';
 
 // Display confirmation form
 ?>

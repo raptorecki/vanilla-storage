@@ -1,5 +1,7 @@
 <?php
-require 'header.php';
+session_start(); // Start the session to handle flash messages
+require_once 'database.php';
+require_once __DIR__ . '/helpers/error_logger.php';
 
 // Check for drive ID
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
@@ -9,17 +11,6 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 }
 
 $drive_id = (int)$_GET['id'];
-
-// Fetch drive details
-$stmt = $pdo->prepare("SELECT * FROM st_drives WHERE id = ?");
-$stmt->execute([$drive_id]);
-$drive = $stmt->fetch();
-
-if (!$drive) {
-    $_SESSION['flash_message'] = ['type' => 'error', 'text' => 'Drive not found.'];
-    header('Location: drives.php');
-    exit();
-}
 
 // --- Form Submission Logic (Update Drive) ---
 $update_form_error = '';
@@ -70,8 +61,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_drive'])) {
     }
 }
 
+// Fetch drive details (after potential update)
+$stmt = $pdo->prepare("SELECT * FROM st_drives WHERE id = ?");
+$stmt->execute([$drive_id]);
+$drive = $stmt->fetch();
+
+if (!$drive) {
+    $_SESSION['flash_message'] = ['type' => 'error', 'text' => 'Drive not found.'];
+    header('Location: drives.php');
+    exit();
+}
+
 // Get a list of drives that can be paired (i.e., don't have a pair yet)
 $unpaired_drives = $pdo->query("SELECT id, name, serial FROM st_drives WHERE pair_id IS NULL OR id = {$drive_id} ORDER BY name ASC")->fetchAll();
+
+require 'header.php';
 
 ?>
 

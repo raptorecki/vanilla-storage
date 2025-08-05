@@ -1,9 +1,10 @@
 <?php
-require 'header.php';
-
 // --- Form Submission Logic (Add New Drive) ---
 $add_form_error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_drive'])) {
+    require_once 'database.php'; // Include database connection here for early processing
+    require_once __DIR__ . '/helpers/error_logger.php'; // Include error logger
+
     $required_fields = ['an_serial', 'name', 'vendor', 'model', 'model_number', 'size', 'serial'];
     $form_data = [];
     foreach ($_POST as $key => $value) {
@@ -41,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_drive'])) {
 
             $pdo->commit();
 
+            session_start(); // Start session before setting flash message
             $_SESSION['flash_message'] = ['type' => 'success', 'text' => 'Successfully added new drive.'];
             header('Location: ' . $_SERVER['PHP_SELF']);
             exit();
@@ -51,6 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_drive'])) {
         }
     }
 }
+
+require 'header.php';
 
 // --- Sorting Logic ---
 $allowed_columns = ['id', 'an_serial', 'name', 'legacy_name', 'vendor', 'model', 'model_number', 'size', 'serial', 'firmware', 'smart', 'summary', 'pair_name', 'dead', 'online', 'offsite', 'encrypted', 'empty', 'filesystem', 'date_added', 'date_updated'];
