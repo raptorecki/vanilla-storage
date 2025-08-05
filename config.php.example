@@ -1,0 +1,10 @@
+<?php
+return [
+    'db' => [
+        'host' => 'localhost',
+        'name' => 'storage',
+        'user' => 'storage',
+        'pass' => 'rb7GKWTp!*dNTUu7',
+        'charset' => 'utf8mb4'
+    ]
+];

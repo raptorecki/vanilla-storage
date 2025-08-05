@@ -1,0 +1,190 @@
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #ffffff;
+            text-align: center;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        h2 {
+            color: #ffffff;
+            border-bottom: 1px solid #333;
+            padding-bottom: 8px;
+            margin-top: 40px;
+        }
+
+        .container {
+            max-width: 95%;
+            margin: 0 auto;
+            overflow-x: auto; /* Allows horizontal scrolling for the wide table */
+        }
+
+        .error {
+            background-color: #5d1a1a;
+            color: #ffc4c4;
+            padding: 15px;
+            border: 1px solid #a53030;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .flash-message {
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            color: #ffffff;
+        }
+        .flash-message.success {
+            background-color: #1a5d2b;
+            border: 1px solid #30a54a;
+        }
+
+        /* --- Search Form Styles --- */
+        .search-container {
+            margin-bottom: 25px;
+            display: flex;
+            gap: 10px;
+        }
+        .search-container input[type="text"] {
+            flex-grow: 1;
+            background-color: #2b2b2b;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        .search-container input[type="text"]:focus {
+            outline: none;
+            border-color: #5a9fd4;
+        }
+        .search-container button, .search-container a {
+            background-color: #3a7ab8;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+
+        /* --- Form Styles --- */
+        details {
+            background-color: #1f1f1f;
+            border: 1px solid #333;
+            border-radius: 5px;
+            margin-bottom: 25px;
+        }
+        summary {
+            padding: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            outline: none;
+        }
+        .form-container {
+            padding: 0 20px 20px 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group label {
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            color: #c0c0c0;
+        }
+        .form-group input, .form-group textarea {
+            background-color: #2b2b2b;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        .form-group input:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #5a9fd4;
+        }
+        .form-actions {
+            grid-column: 1 / -1; /* Span across all columns */
+            text-align: right;
+        }
+        .form-actions button {
+            background-color: #3a7ab8;
+            color: #ffffff;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: bold;
+        }
+        .form-actions button:hover {
+            background-color: #4a8ac8;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        th, td {
+            border: 1px solid #333;
+            padding: 12px 15px;
+            text-align: left;
+            white-space: nowrap; /* Prevents text from wrapping */
+        }
+
+        thead th {
+            background-color: #1f1f1f;
+            color: #f5f5f5;
+            font-weight: bold;
+            position: sticky;
+            top: 0; /* Makes header sticky on vertical scroll */
+        }
+
+        tbody tr:nth-child(even) {
+            background-color: #1a1a1a;
+        }
+
+        tbody tr:hover {
+            background-color: #2a2a2a;
+            cursor: pointer;
+        }
+
+        thead th a {
+            color: inherit;
+            text-decoration: none;
+            display: block; /* Makes the entire header cell clickable */
+        }
+
+        thead th a:hover {
+            color: #ffffff;
+        }
+
+        /* Style for links within the table body */
+        tbody td a {
+            color: #a9d1ff; /* A lighter blue for visibility */
+            text-decoration: none;
+        }
+
+        tbody td a:hover {
+            text-decoration: underline;
+        }
+
