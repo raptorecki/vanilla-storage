@@ -114,7 +114,7 @@ $unpaired_drives = $pdo->query("SELECT id, name, serial FROM st_drives WHERE pai
     <div class="form-group" style="grid-column: 1 / -1;"><label for="summary">Summary</label><input type="text" id="summary" name="summary" value="<?= htmlspecialchars($drive['summary']) ?>"></div>
     <div class="form-actions">
         <button type="submit" name="update_drive">Update Drive</button>
-        <a href="drives.php">Cancel</a>
+        <a href="drives.php" class="button" style="margin-left: 10px;">Cancel</a>
     </div>
 </form>
 
