@@ -1,1 +1,2 @@
 [2025-08-06 00:39:09] Error [8192]: Implicit conversion from float 306.55183696746826 to int loses precision in /home/marecki/storage/scan_drive.php on line 500
+[2025-08-06 01:00:59] Error [8192]: Implicit conversion from float 368.4057960510254 to int loses precision in /home/marecki/storage/scan_drive.php on line 623

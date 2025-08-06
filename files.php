@@ -209,6 +209,8 @@ try {
                         <td><?= htmlspecialchars($file['media_format'] ?? '—') ?></td>
                         <td style="white-space: normal;"><?= htmlspecialchars($file['media_codec'] ?? '—') ?></td>
                         <td><?= htmlspecialchars($file['media_resolution'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($file['product_name'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($file['product_version'] ?? '—') ?></td>
                         <td>
                             <?php if (!empty($file['md5_hash'])): ?>
                                 <a href="files.php?filename=<?= htmlspecialchars($file['md5_hash']) ?>" title="Find duplicates"><?= htmlspecialchars($file['md5_hash']) ?></a>
