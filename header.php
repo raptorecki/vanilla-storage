@@ -148,15 +148,31 @@ $current_page = basename($_SERVER['PHP_SELF']);
             outline: none; border-color: #5a9fd4;
         }
         .form-actions {
-            grid-column: 1 / -1; text-align: right;
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            align-items: center;
         }
         .form-actions button {
             background-color: #3a7ab8; color: #ffffff; border: none;
             padding: 12px 20px; border-radius: 4px; cursor: pointer;
             font-size: 1em; font-weight: bold;
         }
+        .form-actions a.button {
+            background-color: #6c757d; /* A neutral/secondary color for cancel/back actions */
+            color: #ffffff;
+            padding: 12px 20px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 1em;
+            font-weight: bold;
+        }
         .form-actions button:hover {
             background-color: #4a8ac8;
+        }
+        .form-actions a.button:hover {
+            background-color: #5a6268;
         }
         table {
             width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 0.9em;

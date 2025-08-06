@@ -79,7 +79,7 @@ require 'header.php';
     </div>
     <div class="form-actions">
         <button type="submit" name="confirm_delete">Delete Drive</button>
-        <a href="drives.php" class="button" style="margin-left: 10px;">Cancel</a>
+        <a href="drives.php" class="button">Cancel</a>
     </div>
 </form>
 
