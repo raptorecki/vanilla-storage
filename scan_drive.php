@@ -35,16 +35,17 @@ if ($noMd5Key !== false) {
 // Re-index and check for required arguments
 $args = array_values($args);
 
-if (count($args) < 2) {
-    echo "Usage: php " . basename(__FILE__) . " [--no-md5] <drive_id> <mount_point>\n";
+if (count($args) < 3) {
+    echo "Usage: php " . basename(__FILE__) . " [--no-md5] <drive_id> <partition_number> <mount_point>\n";
     echo "  --no-md5 : Optional. Skips MD5 hash calculation for a faster scan.\n";
-    echo "Example: php " . basename(__FILE__) . " 5 /mnt/my_external_drive\n";
-    echo "Example: php " . basename(__FILE__) . " --no-md5 5 /mnt/my_external_drive\n";
+    echo "Example: php " . basename(__FILE__) . " 5 1 /mnt/my_external_drive\n";
+    echo "Example: php " . basename(__FILE__) . " --no-md5 5 1 /mnt/my_external_drive\n";
     exit(1);
 }
 
 $driveId = (int)$args[0];
-$mountPoint = $args[1];
+$partitionNumber = (int)$args[1];
+$mountPoint = $args[2];
 
 if ($driveId <= 0) {
     echo "Error: Invalid drive_id provided.\n";
@@ -296,16 +297,17 @@ try {
         "exif_date_taken = VALUES(exif_date_taken)",
         "exif_camera_model = VALUES(exif_camera_model)",
         "file_category = VALUES(file_category)",
-        "is_directory = VALUES(is_directory)"
+        "is_directory = VALUES(is_directory)",
+        "partition_number = VALUES(partition_number)"
     ];
 
     if ($calculateMd5) {
-        $insert_cols = "drive_id, path, path_hash, filename, size, md5_hash, ctime, mtime, file_category, media_format, media_codec, media_resolution, media_duration, exif_date_taken, exif_camera_model, is_directory, date_added, date_deleted";
-        $insert_vals = ":drive_id, :path, :path_hash, :filename, :size, :md5_hash, :ctime, :mtime, :file_category, :media_format, :media_codec, :media_resolution, :media_duration, :exif_date_taken, :exif_camera_model, :is_directory, NOW(), NULL";
+        $insert_cols = "drive_id, path, path_hash, filename, size, md5_hash, ctime, mtime, file_category, media_format, media_codec, media_resolution, media_duration, exif_date_taken, exif_camera_model, is_directory, partition_number, date_added, date_deleted";
+        $insert_vals = ":drive_id, :path, :path_hash, :filename, :size, :md5_hash, :ctime, :mtime, :file_category, :media_format, :media_codec, :media_resolution, :media_duration, :exif_date_taken, :exif_camera_model, :is_directory, :partition_number, NOW(), NULL";
         $update_clauses[] = "md5_hash = VALUES(md5_hash)";
     } else {
-        $insert_cols = "drive_id, path, path_hash, filename, size, ctime, mtime, file_category, media_format, media_codec, media_resolution, media_duration, exif_date_taken, exif_camera_model, is_directory, date_added, date_deleted";
-        $insert_vals = ":drive_id, :path, :path_hash, :filename, :size, :ctime, :mtime, :file_category, :media_format, :media_codec, :media_resolution, :media_duration, :exif_date_taken, :exif_camera_model, :is_directory, NOW(), NULL";
+        $insert_cols = "drive_id, path, path_hash, filename, size, ctime, mtime, file_category, media_format, media_codec, media_resolution, media_duration, exif_date_taken, exif_camera_model, is_directory, partition_number, date_added, date_deleted";
+        $insert_vals = ":drive_id, :path, :path_hash, :filename, :size, :ctime, :mtime, :file_category, :media_format, :media_codec, :media_resolution, :media_duration, :exif_date_taken, :exif_camera_model, :is_directory, :partition_number, NOW(), NULL";
         // When not calculating MD5, we don't update the existing hash on duplicates.
     }
 
@@ -381,6 +383,7 @@ try {
             'exif_camera_model' => $metadata['exif_camera_model'],
             'file_category' => $fileInfo->isDir() ? 'Directory' : $category,
             'is_directory' => $fileInfo->isDir() ? 1 : 0,
+            'partition_number' => $partitionNumber,
         ];
 
         if ($calculateMd5) {

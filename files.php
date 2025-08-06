@@ -5,6 +5,7 @@ require 'header.php';
 $search_params = [
     'filename' => trim($_GET['filename'] ?? ''), // This now accepts filename, path, or MD5
     'drive_id' => filter_input(INPUT_GET, 'drive_id', FILTER_VALIDATE_INT),
+    'partition_number' => filter_input(INPUT_GET, 'partition_number', FILTER_VALIDATE_INT),
     'category' => trim($_GET['category'] ?? ''),
     'size_min' => filter_input(INPUT_GET, 'size_min', FILTER_VALIDATE_FLOAT),
     'size_max' => filter_input(INPUT_GET, 'size_max', FILTER_VALIDATE_FLOAT),
@@ -57,6 +58,10 @@ try {
         if ($search_params['drive_id']) {
             $where_clauses[] = "f.drive_id = ?";
             $params[] = $search_params['drive_id'];
+        }
+        if ($search_params['partition_number']) {
+            $where_clauses[] = "f.partition_number = ?";
+            $params[] = $search_params['partition_number'];
         }
         if ($search_params['category']) {
             $where_clauses[] = "f.file_category = ?";
@@ -125,6 +130,7 @@ try {
         <summary>Advanced Search Options</summary>
         <div class="form-container" style="padding-top: 15px;">
             <div class="form-group"><label>Drive</label><select name="drive_id"><option value="">Any Drive</option><?php foreach ($drives_for_form as $drive): ?><option value="<?= $drive['id'] ?>" <?= ($search_params['drive_id'] == $drive['id']) ? 'selected' : '' ?>><?= htmlspecialchars($drive['name']) ?></option><?php endforeach; ?></select></div>
+            <div class="form-group"><label>Partition</label><input type="number" name="partition_number" placeholder="e.g., 1" value="<?= htmlspecialchars($search_params['partition_number'] ?? '') ?>"></div>
             <div class="form-group"><label>Category</label><select name="category"><option value="">Any Category</option><?php foreach ($categories_for_form as $cat): ?><option value="<?= htmlspecialchars($cat['file_category']) ?>" <?= ($search_params['category'] == $cat['file_category']) ? 'selected' : '' ?>><?= htmlspecialchars($cat['file_category']) ?></option><?php endforeach; ?></select></div>
             <div class="form-group"><label>Min Size</label><input type="number" step="any" name="size_min" placeholder="e.g., 500" value="<?= htmlspecialchars($search_params['size_min'] ?? '') ?>"></div>
             <div class="form-group"><label>Max Size</label><input type="number" step="any" name="size_max" placeholder="e.g., 1024" value="<?= htmlspecialchars($search_params['size_max'] ?? '') ?>"></div>
@@ -159,6 +165,7 @@ try {
             <thead>
                 <tr>
                     <th>Drive</th>
+                    <th>Partition</th>
                     <th>Filename</th>
                     <th>Path</th>
                     <th>Category</th>
@@ -174,6 +181,7 @@ try {
                 <?php foreach ($files as $file): ?>
                     <tr>
                         <td><a href="browse.php?drive_id=<?= htmlspecialchars($file['drive_id']) ?>"><?= htmlspecialchars($file['drive_name']) ?></a></td>
+                        <td><?= htmlspecialchars($file['partition_number']) ?></td>
                         <td>
                             <a href="files.php?filename=<?= urlencode(basename($file['path'])) ?>" title="Search for this filename">
                                 <?= htmlspecialchars(basename($file['path'])) ?>
