@@ -14,6 +14,8 @@ $search_params = [
     'mtime_before' => trim($_GET['mtime_before'] ?? ''),
     'codec' => trim($_GET['codec'] ?? ''),
     'resolution' => trim($_GET['resolution'] ?? ''),
+    'product_name' => trim($_GET['product_name'] ?? ''),
+    'product_version' => trim($_GET['product_version'] ?? ''),
 ];
 
 $allowed_page_sizes = [10, 20, 50, 100, 200, 500, 1000];
@@ -139,6 +141,8 @@ try {
             <div class="form-group"><label>Modified Before</label><input type="date" name="mtime_before" value="<?= htmlspecialchars($search_params['mtime_before']) ?>"></div>
             <div class="form-group"><label>Codec</label><input type="text" name="codec" placeholder="e.g., h264, flac" value="<?= htmlspecialchars($search_params['codec']) ?>"></div>
             <div class="form-group"><label>Resolution</label><input type="text" name="resolution" placeholder="e.g., 1920x1080" value="<?= htmlspecialchars($search_params['resolution']) ?>"></div>
+            <div class="form-group"><label>Product Name</label><input type="text" name="product_name" placeholder="e.g., Microsoft Office" value="<?= htmlspecialchars($search_params['product_name'] ?? '') ?>"></div>
+            <div class="form-group"><label>Product Version</label><input type="text" name="product_version" placeholder="e.g., 1.0.0.0" value="<?= htmlspecialchars($search_params['product_version'] ?? '') ?>"></div>
         </div>
     </details>
 
@@ -174,6 +178,8 @@ try {
                     <th>Format</th>
                     <th>Codec</th>
                     <th>Resolution</th>
+                    <th>Product Name</th>
+                    <th>Product Version</th>
                     <th>MD5 Hash</th>
                 </tr>
             </thead>
