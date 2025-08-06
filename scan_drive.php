@@ -461,26 +461,30 @@ try {
         "product_version = VALUES(product_version)"
     ];
 
-    $insert_cols_base = "drive_id, path, path_hash, filename, size, ctime, mtime, file_category, media_format, media_codec, media_resolution, media_duration, exif_date_taken, exif_camera_model, is_directory, partition_number, product_name, product_version, date_added, date_deleted";
-    $insert_vals_base = ":drive_id, :path, :path_hash, :filename, :size, :ctime, :mtime, :file_category, :media_format, :media_codec, :media_resolution, :media_duration, :exif_date_taken, :exif_camera_model, :is_directory, :partition_number, :product_name, :product_version, NOW(), NULL";
+    $insert_cols_array = [
+        "drive_id", "path", "path_hash", "filename", "size", "ctime", "mtime",
+        "file_category", "media_format", "media_codec", "media_resolution",
+        "media_duration", "exif_date_taken", "exif_camera_model", "is_directory",
+        "partition_number", "product_name", "product_version", "date_added", "date_deleted"
+    ];
+    $insert_vals_array = [
+        ":drive_id", ":path", ":path_hash", ":filename", ":size", ":ctime", ":mtime",
+        ":file_category", ":media_format", ":media_codec", ":media_resolution",
+        ":media_duration", ":exif_date_taken", ":exif_camera_model", ":is_directory",
+        ":partition_number", ":product_name", ":product_version", "NOW()", "NULL"
+    ];
 
     if ($calculateMd5) {
-        // If MD5 calculation is enabled, include md5_hash in insert/update.
-        $insert_cols = "md5_hash, " . $insert_cols_base;
-        $insert_vals = ":md5_hash, " . $insert_vals_base;
+        array_splice($insert_cols_array, 5, 0, "md5_hash"); // Insert md5_hash at index 5
+        array_splice($insert_vals_array, 5, 0, ":md5_hash"); // Insert :md5_hash at index 5
         $update_clauses[] = "md5_hash = VALUES(md5_hash)";
-    } else {
-        // If MD5 calculation is disabled, exclude md5_hash.
-        $insert_cols = $insert_cols_base;
-        $insert_vals = $insert_vals_base;
-        // When not calculating MD5, we don't update the existing hash on duplicates.
     }
 
     // Construct the final SQL query.
     $sql = sprintf(
         "INSERT INTO st_files (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
-        $insert_cols,
-        $insert_vals,
+        implode(", ", $insert_cols_array),
+        implode(", ", $insert_vals_array),
         implode(",\n            ", $update_clauses)
     );
     $upsertStmt = $pdo->prepare($sql);
@@ -560,6 +564,8 @@ try {
             'file_category' => $fileInfo->isDir() ? 'Directory' : $category, // Set category to 'Directory' for directories.
             'is_directory' => $fileInfo->isDir() ? 1 : 0, // Boolean flag for directory.
             'partition_number' => $partitionNumber, // The partition number for the file.
+            'product_name' => $metadata['product_name'],
+            'product_version' => $metadata['product_version'],
         ];
 
         // Calculate MD5 hash if enabled and the current item is a file (not a directory).
