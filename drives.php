@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_drive'])) {
 require 'header.php';
 
 // --- Sorting Logic ---
-$allowed_columns = ['id', 'an_serial', 'name', 'legacy_name', 'vendor', 'model', 'model_number', 'size', 'serial', 'firmware', 'smart', 'summary', 'pair_name', 'dead', 'online', 'offsite', 'encrypted', 'empty', 'filesystem', 'date_added', 'date_updated'];
+$allowed_columns = ['id', 'an_serial', 'name', 'legacy_name', 'vendor', 'model', 'model_number', 'size', 'serial', 'firmware', 'smart', 'summary', 'pair_name', 'dead', 'online', 'offsite', 'encrypted', 'empty', 'filesystem', 'scan_status', 'date_added', 'date_updated'];
 $sort_column = $_GET['sort'] ?? 'id';
 if (!in_array($sort_column, $allowed_columns)) $sort_column = 'id';
 $sort_direction = strtolower($_GET['dir'] ?? 'asc');
@@ -72,7 +72,18 @@ $error_message = '';
 
 try {
     // Query to get drives and their pair's name using a self-join
-    $sql = "SELECT d1.*, d2.name as pair_name FROM st_drives d1 LEFT JOIN st_drives d2 ON d1.pair_id = d2.id";
+    $sql = "
+        SELECT 
+            d1.*, 
+            d2.name as pair_name,
+            CASE
+                WHEN d1.dead = 1 OR d1.empty = 1 THEN 'N/A'
+                WHEN EXISTS (SELECT 1 FROM st_scans s WHERE s.drive_id = d1.id) THEN 'Done'
+                ELSE 'Required'
+            END AS scan_status
+        FROM st_drives d1 
+        LEFT JOIN st_drives d2 ON d1.pair_id = d2.id
+    ";
     $params = [];
 
     if (!empty($search_term)) {
@@ -161,7 +172,7 @@ try {
                     'vendor' => 'Vendor', 'model' => 'Model', 'model_number' => 'Model No.', 'size' => 'Size', 'serial' => 'Serial', 'firmware' => 'Firmware',
                     'smart' => 'SMART', 'summary' => 'Summary', 'dead' => 'Dead', 'online' => 'Online', 'offsite' => 'Offsite',
                     'encrypted' => 'Encrypted', 'empty' => 'Empty', 'filesystem' => 'Filesystem', 'pair_name' => 'Paired With',
-                    'date_added' => 'Added', 'date_updated' => 'Last Scanned', 'actions' => 'Actions'
+                    'scan_status' => 'Scan', 'date_added' => 'Added', 'date_updated' => 'Last Updated', 'actions' => 'Actions'
                 ];
                 foreach ($headers as $col => $title):
                     $is_sorted_column = ($sort_column === $col);
@@ -175,28 +186,39 @@ try {
         <tbody>
             <?php foreach ($drives as $drive): ?>
                 <tr>
-                    <td><?= htmlspecialchars($drive['id']) ?></td>
-                    <td><?= htmlspecialchars($drive['an_serial']) ?></td>
-                    <td><a href="browse.php?drive_id=<?= htmlspecialchars($drive['id']) ?>"><?= htmlspecialchars($drive['name']) ?></a></td>
-                    <td><?= htmlspecialchars($drive['legacy_name'] ?? '—') ?></td>
-                    <td><?= htmlspecialchars($drive['vendor']) ?></td>
-                    <td><?= htmlspecialchars($drive['model']) ?></td>
-                    <td><?= htmlspecialchars($drive['model_number'] ?? '—') ?></td>
-                    <td><?= htmlspecialchars(formatSize((int)$drive['size'])) ?></td>
-                    <td><?= htmlspecialchars($drive['serial']) ?></td>
-                    <td><?= htmlspecialchars($drive['firmware'] ?? '—') ?></td>
-                    <td><?= htmlspecialchars($drive['smart'] ?? '—') ?></td>
-                    <td><span title="<?= htmlspecialchars($drive['summary'] ?? '') ?>"><?= htmlspecialchars(mb_strimwidth($drive['summary'] ?? '—', 0, 40, "...")) ?></span></td>
-                    <td><?= $drive['dead'] ? 'Yes' : 'No' ?></td>
-                    <td><?= $drive['online'] ? 'Yes' : 'No' ?></td>
-                    <td><?= $drive['offsite'] ? 'Yes' : 'No' ?></td>
-                    <td><?= $drive['encrypted'] ? 'Yes' : 'No' ?></td>
-                    <td><?= $drive['empty'] ? 'Yes' : 'No' ?></td>
-                    <td><?= htmlspecialchars($drive['filesystem'] ?? '—') ?></td>
-                    <td><?= !empty($drive['pair_id']) ? '<a href="?search=' . htmlspecialchars($drive['pair_name'] ?? '') . '">' . htmlspecialchars($drive['pair_name'] ?? 'ID: ' . $drive['pair_id']) . '</a>' : '—' ?></td>
-                    <td><?= htmlspecialchars($drive['date_added']) ?></td>
-                    <td><?= htmlspecialchars($drive['date_updated']) ?></td>
-                    <td><a href="edit_drive.php?id=<?= htmlspecialchars($drive['id']) ?>">Edit</a> | <a href="delete_drive.php?id=<?= htmlspecialchars($drive['id']) ?>">Delete</a></td>
+                    <?php foreach ($headers as $col => $title): ?>
+                        <td>
+                            <?php
+                            switch ($col) {
+                                case 'name':
+                                    echo '<a href="browse.php?drive_id=' . htmlspecialchars($drive['id']) . '">' . htmlspecialchars($drive['name']) . '</a>';
+                                    break;
+                                case 'size':
+                                    echo htmlspecialchars(formatSize((int)$drive['size']));
+                                    break;
+                                case 'summary':
+                                    echo '<span title="' . htmlspecialchars($drive['summary'] ?? '') . '">' . htmlspecialchars(mb_strimwidth($drive['summary'] ?? '—', 0, 40, "...")) . '</span>';
+                                    break;
+                                case 'dead':
+                                case 'online':
+                                case 'offsite':
+                                case 'encrypted':
+                                case 'empty':
+                                    echo $drive[$col] ? 'Yes' : 'No';
+                                    break;
+                                case 'pair_name':
+                                    echo !empty($drive['pair_id']) ? '<a href="?search=' . htmlspecialchars($drive['pair_name'] ?? '') . '">' . htmlspecialchars($drive['pair_name'] ?? 'ID: ' . $drive['pair_id']) . '</a>' : '—';
+                                    break;
+                                case 'actions':
+                                    echo '<a href="edit_drive.php?id=' . htmlspecialchars($drive['id']) . '">Edit</a> | <a href="delete_drive.php?id=' . htmlspecialchars($drive['id']) . '">Delete</a>';
+                                    break;
+                                default:
+                                    echo htmlspecialchars($drive[$col] ?? '—');
+                                    break;
+                            }
+                            ?>
+                        </td>
+                    <?php endforeach; ?>
                 </tr>
             <?php endforeach; ?>
         </tbody>

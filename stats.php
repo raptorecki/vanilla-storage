@@ -33,6 +33,10 @@ try {
         $stats['total_capacity_gb'] = $drive_stats['total_capacity_gb'];
     }
 
+    // Get dead drive count
+    $dead_drives_count = $pdo->query("SELECT COUNT(id) FROM st_drives WHERE dead = 1")->fetchColumn();
+    $stats['dead_drives'] = $dead_drives_count ?: 0;
+
     // 2. Get file stats: total count and total size used
     $file_summary_stats = $pdo->query("
         SELECT
@@ -121,6 +125,7 @@ try {
 <?php else: ?>
     <div class="stats-grid">
         <div class="stat-card"><h3>Number of Drives</h3><p><?= number_format($stats['total_drives']) ?></p></div>
+        <div class="stat-card"><h3>Dead Drives</h3><p><?= number_format($stats['dead_drives']) ?></p></div>
         <div class="stat-card"><h3>Total Storage Capacity</h3><p><?= formatSize((int)$stats['total_capacity_gb']) ?></p></div>
         <div class="stat-card"><h3>Total Storage Used</h3><p><?= formatBytes((int)$stats['total_used_bytes']) ?></p></div>
         <div class="stat-card"><h3>Total Number of Files</h3><p><?= number_format($stats['total_files']) ?></p></div>
