@@ -567,8 +567,7 @@ try {
 
     // Insert a new scan record
     $insertScanStmt = $pdo->prepare(
-        "INSERT INTO st_scans (drive_id, scan_date, total_items_scanned, new_files_added, existing_files_updated, files_marked_deleted, scan_duration, thumbnails_created, thumbnail_creations_failed)
-         VALUES (?, NOW(), 0, 0, 0, 0, 0, 0, 0)"
+        "INSERT INTO st_scans (drive_id, scan_date, total_items_scanned, new_files_added, existing_files_updated, files_marked_deleted, scan_duration, thumbnails_created, thumbnail_creations_failed)\n         VALUES (?, NOW(), 0, 0, 0, 0, 0, 0, 0)"
     );
     $insertScanStmt->execute([$driveId]);
     $scanId = $pdo->lastInsertId();
@@ -576,9 +575,9 @@ try {
     // 1. Mark all existing, non-deleted files for this drive as "deleted".
     // This is a soft delete. If a file is found during the current scan, its `date_deleted` will be set back to NULL.
     echo "Step 1: Marking existing files for deletion check...\n";
-    $stmt = $pdo->prepare("UPDATE st_files SET date_deleted = NOW() WHERE drive_id = ? AND date_deleted IS NULL");
-    $stmt->execute([$driveId]);
-    $stats['deleted'] = $stmt->rowCount(); // The number of rows affected (marked for deletion) is stored.
+    $scanStartTimeForDeletion = date('Y-m-d H:i:s');
+    $stmt = $pdo->prepare("UPDATE st_files SET date_deleted = ? WHERE drive_id = ? AND date_deleted IS NULL");
+    $stmt->execute([$scanStartTimeForDeletion, $driveId]);
 
     // 2. Prepare the main SQL statement for inserting or updating file records.
     // This uses MySQL's `ON DUPLICATE KEY UPDATE` syntax for efficient upsert operations.
@@ -768,10 +767,9 @@ try {
         // Update statistics based on the upsert result.
         if ($rowCount === 1) { // A new row was inserted.
             $stats['added']++;
-            $stats['deleted']--; // A newly added file cannot be a previously deleted one.
+            // A newly added file was not in the initial set of files marked for deletion.
         } elseif ($rowCount === 2) { // An existing row was updated.
             $stats['updated']++;
-            $stats['deleted']--; // This file was found and updated, so it's not deleted.
         }
     }
 
@@ -783,7 +781,7 @@ try {
     $stmt = $pdo->prepare("UPDATE st_drives SET date_updated = NOW() WHERE id = ?");
     $stmt->execute([$driveId]);
 
-    // 5. Commit the database transaction. All changes are now permanently saved.
+    // 5. Commit the database transaction.
     $pdo->commit();
 
 } catch (\Exception $e) {
@@ -807,17 +805,14 @@ if ($duration < 60) {
     $durationFormatted = "{$minutes} minutes, {$seconds} seconds";
 }
 
+// Recalculate deleted files count
+$deletedStmt = $pdo->prepare("SELECT COUNT(*) FROM st_files WHERE drive_id = ? AND date_deleted = ?");
+$deletedStmt->execute([$driveId, $scanStartTimeForDeletion]);
+$stats['deleted'] = $deletedStmt->fetchColumn();
+
 // Update the scan record with final statistics
 $updateScanStmt = $pdo->prepare(
-    "UPDATE st_scans SET
-        total_items_scanned = ?,
-        new_files_added = ?,
-        existing_files_updated = ?,
-        files_marked_deleted = ?,
-        scan_duration = ?,
-        thumbnails_created = ?,
-        thumbnail_creations_failed = ?
-     WHERE scan_id = ?"
+    "UPDATE st_scans SET\n        total_items_scanned = ?,\n        new_files_added = ?,\n        existing_files_updated = ?,\n        files_marked_deleted = ?,\n        scan_duration = ?,\n        thumbnails_created = ?,\n        thumbnail_creations_failed = ?\n     WHERE scan_id = ?"
 );
 $updateScanStmt->execute([
     $stats['scanned'],

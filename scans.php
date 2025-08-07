@@ -87,7 +87,7 @@ try {
                     <td><?= htmlspecialchars($scan['new_files_added']) ?></td>
                     <td><?= htmlspecialchars($scan['existing_files_updated']) ?></td>
                     <td><?= htmlspecialchars($scan['files_marked_deleted']) ?></td>
-                    <td><?= formatDuration($scan['scan_duration']) ?></td>
+                    <td><?= formatDuration((int)$scan['scan_duration']) ?></td>
                     <td><?= htmlspecialchars($scan['thumbnails_created']) ?></td>
                     <td><?= htmlspecialchars($scan['thumbnail_creations_failed']) ?></td>
                 </tr>
