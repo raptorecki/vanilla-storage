@@ -565,6 +565,14 @@ try {
     // Start a database transaction for atomicity. All changes will be committed together or rolled back on error.
     $pdo->beginTransaction();
 
+    // Insert a new scan record
+    $insertScanStmt = $pdo->prepare(
+        "INSERT INTO st_scans (drive_id, scan_date, total_items_scanned, new_files_added, existing_files_updated, files_marked_deleted, scan_duration, thumbnails_created, thumbnail_creations_failed)
+         VALUES (?, NOW(), 0, 0, 0, 0, 0, 0, 0)"
+    );
+    $insertScanStmt->execute([$driveId]);
+    $scanId = $pdo->lastInsertId();
+
     // 1. Mark all existing, non-deleted files for this drive as "deleted".
     // This is a soft delete. If a file is found during the current scan, its `date_deleted` will be set back to NULL.
     echo "Step 1: Marking existing files for deletion check...\n";
@@ -576,6 +584,7 @@ try {
     // This uses MySQL's `ON DUPLICATE KEY UPDATE` syntax for efficient upsert operations.
     $update_clauses = [
         "date_deleted = NULL", // Un-delete the file if it's found again.
+        "last_scan_id = VALUES(last_scan_id)", // Update last_scan_id
         "ctime = VALUES(ctime)",
         "mtime = VALUES(mtime)",
         "size = VALUES(size)",
@@ -598,13 +607,13 @@ try {
         "drive_id", "path", "path_hash", "filename", "size", "ctime", "mtime",
         "file_category", "media_format", "media_codec", "media_resolution",
         "media_duration", "exif_date_taken", "exif_camera_model", "is_directory",
-        "partition_number", "product_name", "product_version", "exiftool_json", "thumbnail_path", "date_added", "date_deleted"
+        "partition_number", "product_name", "product_version", "exiftool_json", "thumbnail_path", "date_added", "date_deleted", "last_scan_id"
     ];
     $insert_vals_array = [
         ":drive_id", ":path", ":path_hash", ":filename", ":size", ":ctime", ":mtime",
         ":file_category", ":media_format", ":media_codec", ":media_resolution",
         ":media_duration", ":exif_date_taken", ":exif_camera_model", ":is_directory",
-        ":partition_number", ":product_name", ":product_version", ":exiftool_json", ":thumbnail_path", "NOW()", "NULL"
+        ":partition_number", ":product_name", ":product_version", ":exiftool_json", ":thumbnail_path", "NOW()", "NULL", ":last_scan_id"
     ];
 
     if ($calculateMd5) {
@@ -713,6 +722,7 @@ try {
             'product_version' => $metadata['product_version'],
             'exiftool_json' => $exiftoolJson,
             'thumbnail_path' => $thumbnailPath,
+            'last_scan_id' => $scanId,
         ];
 
         // Calculate MD5 hash if enabled and the current item is a file (not a directory).
@@ -796,6 +806,29 @@ if ($duration < 60) {
     $seconds = round($duration % 60);
     $durationFormatted = "{$minutes} minutes, {$seconds} seconds";
 }
+
+// Update the scan record with final statistics
+$updateScanStmt = $pdo->prepare(
+    "UPDATE st_scans SET
+        total_items_scanned = ?,
+        new_files_added = ?,
+        existing_files_updated = ?,
+        files_marked_deleted = ?,
+        scan_duration = ?,
+        thumbnails_created = ?,
+        thumbnail_creations_failed = ?
+     WHERE scan_id = ?"
+);
+$updateScanStmt->execute([
+    $stats['scanned'],
+    $stats['added'],
+    $stats['updated'],
+    $stats['deleted'],
+    round($duration), // Store duration in seconds
+    $stats['thumbnails_created'],
+    $stats['thumbnails_failed'],
+    $scanId
+]);
 
 // --- Scan Summary Output ---
 echo "\n--- Scan Complete ---\n";

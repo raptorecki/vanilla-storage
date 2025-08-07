@@ -1,4 +1,4 @@
-        body {
+body {
             background-color: #121212;
             color: #e0e0e0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -188,3 +188,194 @@
             text-decoration: underline;
         }
 
+        /* --- Action Button Styles --- */
+        .actions-cell {
+            text-align: center;
+        }
+        .action-btn {
+            display: inline-block;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 4px;
+            background-color: #3a7ab8;
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 0.9em;
+            white-space: nowrap;
+        }
+        .action-btn:hover {
+            background-color: #4a8ac8;
+        }
+
+        /* --- Pagination Styles --- */
+        .pagination {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .pagination a, .pagination span {
+            color: #a9d1ff;
+            padding: 8px 12px;
+            text-decoration: none;
+            border: 1px solid #333;
+            margin: 0 2px;
+            border-radius: 4px;
+        }
+        .pagination a:hover {
+            background-color: #2a2a2a;
+        }
+        .pagination span {
+            background-color: #1f1f1f;
+            font-weight: bold;
+        }
+
+        /* --- EXIF and Thumbnail Viewer Styles --- */
+        .exif-viewer, .thumbnail-viewer {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 25px;
+            z-index: 1000;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: auto;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        .exif-viewer h2, .thumbnail-viewer h2 {
+            margin-top: 0;
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+        }
+        .exif-viewer pre {
+            background-color: #111;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .exif-viewer .close-exif, .thumbnail-viewer .close-thumb {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            color: #ccc;
+            text-decoration: none;
+            font-size: 1.2em;
+        }
+        .thumbnail-viewer img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin-top: 15px;
+        }
+        .exif-viewer.error, .thumbnail-viewer.error {
+            background-color: #5d1a1a;
+            color: #ffc4c4;
+        }
+
+        /* --- Stats Page Styles --- */
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .stat-card {
+            background-color: #1f1f1f;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        .stat-card h2 {
+            margin-top: 0;
+            font-size: 1.5em;
+            color: #ffffff;
+        }
+        .stat-card p {
+            font-size: 2em;
+            margin: 10px 0;
+            color: #3a7ab8;
+            font-weight: bold;
+        }
+        .stat-card ul {
+            list-style: none;
+            padding: 0;
+        }
+        .stat-card li {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .stat-card li:last-child {
+            border-bottom: none;
+        }
+        .stat-card li span {
+            font-weight: bold;
+        }
+
+        /* --- Browse Page Styles --- */
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 1.2em;
+        }
+        .breadcrumb a {
+            color: #a9d1ff;
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        .file-browser td:first-child {
+            width: 20px; /* For the icon */
+        }
+        .file-browser .icon {
+            width: 16px;
+            height: 16px;
+        }
+        .file-browser .dir-link {
+            font-weight: bold;
+        }
+        .file-browser .size, .file-browser .date {
+            color: #999;
+        }
+        .file-browser .actions a {
+            margin-right: 10px;
+        }
+
+        /* --- Drive Management Styles --- */
+        .drive-actions {
+            margin-bottom: 20px;
+        }
+        .drive-actions a {
+            background-color: #3a7ab8;
+            color: #ffffff;
+            padding: 10px 15px;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .drive-actions a:hover {
+            background-color: #4a8ac8;
+        }
+        .drive-table td.actions a {
+            margin-right: 10px;
+        }
+        .drive-table td.actions a.delete {
+            color: #ff8a8a;
+        }
+        .drive-table td.actions a.delete:hover {
+            color: #ff5c5c;
+        }
+        select, input[type="number"] {
+            background-color: #2b2b2b;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        select:focus, input[type="number"]:focus {
+            outline: none;
+            border-color: #5a9fd4;
+        }

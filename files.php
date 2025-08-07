@@ -29,6 +29,27 @@ if ($exif_file_id) {
     }
 }
 
+// --- Thumbnail Viewer ---
+$thumb_file_id = filter_input(INPUT_GET, 'view_thumb', FILTER_VALIDATE_INT);
+$thumb_path = null;
+$thumb_error = '';
+if ($thumb_file_id) {
+    try {
+        $stmt = $pdo->prepare("SELECT path, thumbnail_path FROM st_files WHERE id = ?");
+        $stmt->execute([$thumb_file_id]);
+        $file_data = $stmt->fetch();
+
+        if ($file_data && !empty($file_data['thumbnail_path'])) {
+            $thumb_path = $file_data['thumbnail_path'];
+        } else {
+            $thumb_error = 'No thumbnail found for this file.';
+        }
+    } catch (\PDOException $e) {
+        $thumb_error = 'Error fetching thumbnail data.';
+        log_error("Thumbnail Fetch Error: " . $e->getMessage());
+    }
+}
+
 // --- Search & Pagination Configuration ---
 $search_params = [
     'filename' => trim($_GET['filename'] ?? ''), // This now accepts filename, path, or MD5
@@ -162,6 +183,19 @@ try {
 </div>
 <?php endif; ?>
 
+<?php if ($thumb_path): ?>
+<div class="thumbnail-viewer">
+    <h2>Thumbnail for: <?= htmlspecialchars($file_data['path']) ?></h2>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>" class="close-thumb">Close</a>
+    <img src="<?= htmlspecialchars($thumb_path) ?>" alt="Thumbnail for <?= htmlspecialchars($file_data['path']) ?>">
+</div>
+<?php elseif ($thumb_error): ?>
+<div class="thumbnail-viewer error">
+    <p><?= htmlspecialchars($thumb_error) ?></p>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>">Close</a>
+</div>
+<?php endif; ?>
+
 <form method="GET" action="files.php" class="search-container" style="flex-direction: column; gap: 20px;">
     <div style="display: flex; gap: 10px;">
         <input type="text" name="filename" placeholder="Search by filename, path, or MD5 hash..." value="<?= htmlspecialchars($search_params['filename']) ?>">
@@ -260,11 +294,12 @@ try {
                                 —
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td class="actions-cell">
                             <?php if (!empty($file['exiftool_json'])): ?>
-                                <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => $file['id']])) ?>">View EXIF</a>
-                            <?php else: ?>
-                                —
+                                <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => $file['id']])) ?>" class="action-btn">Exif</a>
+                            <?php endif; ?>
+                            <?php if (!empty($file['thumbnail_path'])): ?>
+                                <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => $file['id']])) ?>" class="action-btn">Thumb</a>
                             <?php endif; ?>
                         </td>
                     </tr>
