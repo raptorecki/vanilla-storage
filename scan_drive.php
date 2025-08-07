@@ -7,7 +7,7 @@
  * and update drive-specific information like model number, serial, and filesystem type.
  *
  * Usage:
- * php scan_drive.php [--no-md5] [--no-drive-info-update] <drive_id> <partition_number> <mount_point>
+ * php scan_drive.php [--no-md5] [--no-drive-info-update] [--no-thumbnails] <drive_id> <partition_number> <mount_point>
  *
  * Arguments:
  *   <drive_id>          : The integer ID of the drive as stored in the `st_drives` table.
@@ -18,11 +18,12 @@
  *   --no-md5            : Skips MD5 hash calculation for files, which can significantly speed up the scan.
  *   --no-drive-info-update : Skips the automatic update of drive model, serial, and filesystem type
  *                             in the `st_drives` table.
+ *   --no-thumbnails     : Skips generating thumbnails for image files.
  *
  * Examples:
  *   php scan_drive.php 5 1 /mnt/my_external_drive
  *   php scan_drive.php --no-md5 5 1 /mnt/my_external_drive
- *   php scan_drive.php --no-drive-info-update 5 1 /mnt/my_external_drive
+ *   php scan_drive.php --no-drive-info-update --no-thumbnails 5 1 /mnt/my_external_drive
  */
 
 // --- Basic CLI Sanity Checks ---
@@ -37,6 +38,7 @@ if (php_sapi_name() !== 'cli') {
 // 'helpers/error_logger.php' provides a function for logging errors.
 require_once 'database.php';
 require_once 'helpers/error_logger.php';
+require_once 'helpers.php';
 
 
 // --- Argument Parsing ---
@@ -47,21 +49,24 @@ array_shift($args); // Remove the script name itself from the arguments array.
 // Initialize flags based on default behavior.
 $calculateMd5 = true; // By default, MD5 hashes will be calculated.
 $updateDriveInfo = true; // By default, drive information will be updated.
+$generateThumbnails = true; // By default, thumbnails will be generated.
 
 // Check for the '--no-md5' flag.
-// If found, set $calculateMd5 to false and remove the flag from the arguments array.
-$noMd5Key = array_search('--no-md5', $args);
-if ($noMd5Key !== false) {
+if (($key = array_search('--no-md5', $args)) !== false) {
     $calculateMd5 = false;
-    unset($args[$noMd5Key]);
+    unset($args[$key]);
 }
 
 // Check for the '--no-drive-info-update' flag.
-// If found, set $updateDriveInfo to false and remove the flag from the arguments array.
-$noDriveInfoUpdateKey = array_search('--no-drive-info-update', $args);
-if ($noDriveInfoUpdateKey !== false) {
+if (($key = array_search('--no-drive-info-update', $args)) !== false) {
     $updateDriveInfo = false;
-    unset($args[$noDriveInfoUpdateKey]);
+    unset($args[$key]);
+}
+
+// Check for the '--no-thumbnails' flag.
+if (($key = array_search('--no-thumbnails', $args)) !== false) {
+    $generateThumbnails = false;
+    unset($args[$key]);
 }
 
 // Re-index the arguments array after removing optional flags.
@@ -70,12 +75,10 @@ $args = array_values($args);
 // Validate the number of remaining required arguments.
 // Expects drive_id, partition_number, and mount_point.
 if (count($args) < 3) {
-    echo "Usage: php " . basename(__FILE__) . " [--no-md5] [--no-drive-info-update] <drive_id> <partition_number> <mount_point>\n";
+    echo "Usage: php " . basename(__FILE__) . " [--no-md5] [--no-drive-info-update] [--no-thumbnails] <drive_id> <partition_number> <mount_point>\n";
     echo "  --no-md5 : Optional. Skips MD5 hash calculation for a faster scan.\n";
     echo "  --no-drive-info-update : Optional. Skips updating drive model, serial, and filesystem type.\n";
-    echo "Example: php " . basename(__FILE__) . " 5 1 /mnt/my_external_drive\n";
-    echo "Example: php " . basename(__FILE__) . " --no-md5 5 1 /mnt/my_external_drive\n";
-    echo "Example: php " . basename(__FILE__) . " --no-drive-info-update 5 1 /mnt/my_external_drive\n";
+    echo "  --no-thumbnails : Optional. Skips generating thumbnails for image files.\n";
     exit(1);
 }
 
@@ -257,6 +260,12 @@ if (empty($exiftoolPath)) {
     echo "WARNING: `exiftool` command not found. Executable metadata (Product Name, Product Version) will not be extracted. Please install ExifTool to enable this functionality.\n\n";
 }
 
+// Check if PHP's GD extension is loaded for thumbnail generation.
+if ($generateThumbnails && !extension_loaded('gd')) {
+    echo "WARNING: PHP `gd` extension not found. Thumbnail generation is disabled. Please install `php-gd` to enable this functionality.\n\n";
+    $generateThumbnails = false;
+}
+
 /**
  * Extracts video metadata using ffprobe.
  * @param string $filePath The full path to the video file.
@@ -428,6 +437,96 @@ function getExecutableInfo(string $filePath, string $exiftoolPath): array
     ];
 }
 
+/**
+ * Generates a nested path for a thumbnail based on the file ID.
+ *
+ * @param int $fileId The unique ID of the file.
+ * @return string The relative path for the thumbnail, e.g., "thumbnails/00/00/12/000012345.jpg".
+ */
+function getThumbnailPath(int $fileId): string
+{
+    // Pad the ID to 9 digits with leading zeros
+    $paddedId = str_pad($fileId, 9, '0', STR_PAD_LEFT);
+
+    // Create the path parts
+    $part1 = substr($paddedId, 0, 2);
+    $part2 = substr($paddedId, 2, 2);
+    $part3 = substr($paddedId, 4, 2);
+
+    $directoryPath = "thumbnails/{$part1}/{$part2}/{$part3}";
+
+    // The full path to the directory on the filesystem
+    $fullDirectoryPath = __DIR__ . '/' . $directoryPath;
+
+    // Ensure the directory exists before saving the file
+    if (!is_dir($fullDirectoryPath)) {
+        // The 'true' parameter creates nested directories recursively
+        if (!mkdir($fullDirectoryPath, 0755, true)) {
+            // Handle the error case where directory creation fails
+            log_error("Failed to create thumbnail directory: {$fullDirectoryPath}");
+            return ''; // Return empty string on failure
+        }
+    }
+
+    return "{$directoryPath}/{$paddedId}.jpg";
+}
+
+/**
+ * Creates a thumbnail for an image file.
+ * @param string $sourcePath The full path to the source image.
+ * @param string $destinationPath The full path to save the thumbnail.
+ * @param int $maxWidth The maximum width of the thumbnail.
+ * @return bool True on success, false on failure.
+ */
+function createThumbnail(string $sourcePath, string $destinationPath, int $maxWidth = 400): bool
+{
+    if (!extension_loaded('gd')) return false;
+
+    // Ensure the destination directory exists
+    $dir = dirname($destinationPath);
+    if (!is_dir($dir)) {
+        if (!mkdir($dir, 0755, true)) {
+            log_error("Failed to create directory for thumbnail: {$dir}");
+            return false;
+        }
+    }
+
+    list($width, $height, $type) = @getimagesize($sourcePath);
+    if (!$width || !$height) return false;
+
+    $newWidth = min($width, $maxWidth);
+    $newHeight = floor($height * ($newWidth / $width));
+
+    $thumb = imagecreatetruecolor($newWidth, $newHeight);
+    if ($thumb === false) return false;
+
+    $source = null;
+    switch ($type) {
+        case IMAGETYPE_JPEG:
+            $source = @imagecreatefromjpeg($sourcePath);
+            break;
+        case IMAGETYPE_PNG:
+            $source = @imagecreatefrompng($sourcePath);
+            break;
+        case IMAGETYPE_GIF:
+            $source = @imagecreatefromgif($sourcePath);
+            break;
+        default:
+            return false; // Unsupported image type
+    }
+
+    if ($source === false) return false;
+
+    imagecopyresampled($thumb, $source, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+    $success = imagejpeg($thumb, $destinationPath, 85); // Save as JPEG with 85% quality
+
+    imagedestroy($thumb);
+    imagedestroy($source);
+
+    return $success;
+}
+
 // --- File Type Categorization ---
 // A map of common file extensions to their general categories.
 $extensionMap = [
@@ -457,6 +556,9 @@ $stats = [
     'added' => 0,   // New files added to the database.
     'updated' => 0, // Existing files updated in the database.
     'deleted' => 0, // Files marked as deleted (not found during current scan).
+    'thumbnails_created' => 0,
+    'thumbnails_failed' => 0,
+    'thumbnails_size' => 0,
 ];
 
 try {
@@ -488,20 +590,21 @@ try {
         "partition_number = VALUES(partition_number)", // Update partition number.
         "product_name = VALUES(product_name)",
         "product_version = VALUES(product_version)",
-        "exiftool_json = VALUES(exiftool_json)"
+        "exiftool_json = VALUES(exiftool_json)",
+        "thumbnail_path = VALUES(thumbnail_path)"
     ];
 
     $insert_cols_array = [
         "drive_id", "path", "path_hash", "filename", "size", "ctime", "mtime",
         "file_category", "media_format", "media_codec", "media_resolution",
         "media_duration", "exif_date_taken", "exif_camera_model", "is_directory",
-        "partition_number", "product_name", "product_version", "exiftool_json", "date_added", "date_deleted"
+        "partition_number", "product_name", "product_version", "exiftool_json", "thumbnail_path", "date_added", "date_deleted"
     ];
     $insert_vals_array = [
         ":drive_id", ":path", ":path_hash", ":filename", ":size", ":ctime", ":mtime",
         ":file_category", ":media_format", ":media_codec", ":media_resolution",
         ":media_duration", ":exif_date_taken", ":exif_camera_model", ":is_directory",
-        ":partition_number", ":product_name", ":product_version", ":exiftool_json", "NOW()", "NULL"
+        ":partition_number", ":product_name", ":product_version", ":exiftool_json", ":thumbnail_path", "NOW()", "NULL"
     ];
 
     if ($calculateMd5) {
@@ -560,6 +663,7 @@ try {
         // Initialize metadata array with default null values.
         $metadata = ['format' => null, 'codec' => null, 'resolution' => null, 'duration' => null, 'exif_date_taken' => null, 'exif_camera_model' => null, 'product_name' => null, 'product_version' => null];
         $exiftoolJson = null;
+        $thumbnailPath = null;
 
         // Extract media metadata for video and audio files if ffprobe is available.
         if (!$fileInfo->isDir() && !empty($ffprobePath)) {
@@ -608,6 +712,7 @@ try {
             'product_name' => $metadata['product_name'],
             'product_version' => $metadata['product_version'],
             'exiftool_json' => $exiftoolJson,
+            'thumbnail_path' => $thumbnailPath,
         ];
 
         // Calculate MD5 hash if enabled and the current item is a file (not a directory).
@@ -623,6 +728,32 @@ try {
         // Execute the prepared upsert statement with the collected parameters.
         $upsertStmt->execute($params);
         $rowCount = $upsertStmt->rowCount(); // Get the number of rows affected by the upsert.
+
+        // --- Thumbnail Generation ---
+        if ($generateThumbnails && !$fileInfo->isDir() && $category === 'Image') {
+            $fileId = $pdo->lastInsertId();
+            // If the row was updated, lastInsertId will be 0. We need to get the ID.
+            if ($fileId == 0) {
+                $idStmt = $pdo->prepare("SELECT id FROM st_files WHERE drive_id = ? AND path_hash = ?");
+                $idStmt->execute([$driveId, hash('sha256', $relativePath)]);
+                $fileId = $idStmt->fetchColumn();
+            }
+
+            if ($fileId) {
+                $thumbnailRelPath = getThumbnailPath($fileId);
+                if (!empty($thumbnailRelPath)) {
+                    $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
+                    if (createThumbnail($path, $thumbDestination)) {
+                        $thumbUpdateStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
+                        $thumbUpdateStmt->execute([$thumbnailRelPath, $fileId]);
+                        $stats['thumbnails_created']++;
+                        $stats['thumbnails_size'] += filesize($thumbDestination);
+                    } else {
+                        $stats['thumbnails_failed']++;
+                    }
+                }
+            }
+        }
 
         // Update statistics based on the upsert result.
         if ($rowCount === 1) { // A new row was inserted.
@@ -672,6 +803,11 @@ echo "Total Items Scanned:  " . number_format($stats['scanned']) . "\n";
 echo "New Files Added:      " . number_format($stats['added']) . "\n";
 echo "Existing Files Updated: " . number_format($stats['updated']) . "\n";
 echo "Files Marked Deleted: " . number_format($stats['deleted']) . "\n";
+if ($generateThumbnails) {
+    echo "Thumbnails Created:   " . number_format($stats['thumbnails_created']) . "\n";
+    echo "Thumbnails Failed:    " . number_format($stats['thumbnails_failed']) . "\n";
+    echo "Thumbnails Size:      " . formatBytes($stats['thumbnails_size']) . "\n";
+}
 echo "Scan Duration:        {$durationFormatted}\n";
 echo "---------------------\n";
 
