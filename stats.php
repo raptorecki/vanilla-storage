@@ -14,6 +14,9 @@ $stats = [
 ];
 $error_message = '';
 
+$limit_options = [10, 20, 50, 100];
+$limit = isset($_GET['limit']) && in_array((int)$_GET['limit'], $limit_options) ? (int)$_GET['limit'] : 20;
+
 try {
     // 1. Get drive stats: total count and total capacity
     $drive_stats = $pdo->query("
@@ -53,8 +56,8 @@ try {
         ORDER BY file_count DESC
     ")->fetchAll();
 
-    // 4. Get the 20 largest files
-    $stats['largest_files'] = $pdo->query("
+    // 4. Get the N largest files
+    $stmt = $pdo->prepare("
         SELECT
             f.path,
             f.size,
@@ -68,8 +71,11 @@ try {
             f.is_directory = 0 AND f.date_deleted IS NULL
         ORDER BY
             f.size DESC
-        LIMIT 20
-    ")->fetchAll();
+        LIMIT :limit
+    ");
+    $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $stats['largest_files'] = $stmt->fetchAll();
 
     // 5. Get drive usage stats for free space calculation
     $drive_usage_query = "
@@ -127,6 +133,16 @@ try {
     <?php endif; ?>
 
     <h2>Largest Files</h2>
+    <div class="table-toolbar">
+        <form action="stats.php" method="get">
+            <label for="limit">Show:</label>
+            <select name="limit" id="limit" onchange="this.form.submit()">
+                <?php foreach ($limit_options as $option): ?>
+                    <option value="<?= $option ?>" <?= ($limit == $option) ? 'selected' : '' ?>><?= $option ?></option>
+                <?php endforeach; ?>
+            </select>
+        </form>
+    </div>
     <?php if (empty($stats['largest_files'])): ?>
         <p>No file data available to determine largest files.</p>
     <?php else: ?>

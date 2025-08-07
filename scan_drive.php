@@ -365,6 +365,35 @@ function getImageInfo(string $filePath): ?array
 }
 
 /**
+ * Extracts all available metadata from a file using exiftool and returns it as a JSON string.
+ * @param string $filePath The full path to the file.
+ * @param string $exiftoolPath The path to the exiftool executable.
+ * @return string|null The full JSON output from exiftool, or null on failure.
+ */
+function getExiftoolJson(string $filePath, string $exiftoolPath): ?string
+{
+    // -G: print group name for each tag, -s: short tag names, -json: output in JSON format.
+    $command = sprintf(
+        '%s -G -s -json %s',
+        $exiftoolPath,
+        escapeshellarg($filePath)
+    );
+    $jsonOutput = @shell_exec($command);
+
+    if (empty($jsonOutput)) {
+        return null;
+    }
+
+    // Basic validation to ensure it's a single JSON object in an array.
+    $data = json_decode($jsonOutput, true);
+    if (json_last_error() === JSON_ERROR_NONE && isset($data[0])) {
+        return $jsonOutput;
+    }
+
+    return null;
+}
+
+/**
  * Extracts executable metadata (Product Name, Product Version) using exiftool.
  * @param string $filePath The full path to the executable file.
  * @param string $exiftoolPath The path to the exiftool executable.
@@ -413,7 +442,7 @@ $extensionMap = [
     'webp' => 'Image', 'tiff' => 'Image', 'svg' => 'Image',
     // Document extensions
     'pdf' => 'Document', 'doc' => 'Document', 'docx' => 'Document', 'xls' => 'Document', 'xlsx' => 'Document',
-    'ppt' => 'Document', 'pptx' => 'Document', 'txt' => 'Document', 'rtf' => 'Document',
+    'ppt' => 'Document', 'pptx' => 'Document', 'txt' => 'Document', 'rtf' => 'Document', 'odt' => 'Document',
     // Archive extensions
     'zip' => 'Archive', 'rar' => 'Archive', '7z' => 'Archive', 'tar' => 'Archive', 'gz' => 'Archive',
     // Executable extensions
@@ -458,20 +487,21 @@ try {
         "is_directory = VALUES(is_directory)",
         "partition_number = VALUES(partition_number)", // Update partition number.
         "product_name = VALUES(product_name)",
-        "product_version = VALUES(product_version)"
+        "product_version = VALUES(product_version)",
+        "exiftool_json = VALUES(exiftool_json)"
     ];
 
     $insert_cols_array = [
         "drive_id", "path", "path_hash", "filename", "size", "ctime", "mtime",
         "file_category", "media_format", "media_codec", "media_resolution",
         "media_duration", "exif_date_taken", "exif_camera_model", "is_directory",
-        "partition_number", "product_name", "product_version", "date_added", "date_deleted"
+        "partition_number", "product_name", "product_version", "exiftool_json", "date_added", "date_deleted"
     ];
     $insert_vals_array = [
         ":drive_id", ":path", ":path_hash", ":filename", ":size", ":ctime", ":mtime",
         ":file_category", ":media_format", ":media_codec", ":media_resolution",
         ":media_duration", ":exif_date_taken", ":exif_camera_model", ":is_directory",
-        ":partition_number", ":product_name", ":product_version", "NOW()", "NULL"
+        ":partition_number", ":product_name", ":product_version", ":exiftool_json", "NOW()", "NULL"
     ];
 
     if ($calculateMd5) {
@@ -529,6 +559,7 @@ try {
         $category = $extensionMap[$extension] ?? 'Other'; // Categorize file based on extension map.
         // Initialize metadata array with default null values.
         $metadata = ['format' => null, 'codec' => null, 'resolution' => null, 'duration' => null, 'exif_date_taken' => null, 'exif_camera_model' => null, 'product_name' => null, 'product_version' => null];
+        $exiftoolJson = null;
 
         // Extract media metadata for video and audio files if ffprobe is available.
         if (!$fileInfo->isDir() && !empty($ffprobePath)) {
@@ -544,6 +575,16 @@ try {
         // Extract image metadata using native PHP functions (does not depend on ffprobe).
         if (!$fileInfo->isDir() && $category === 'Image') {
             $metadata = array_merge($metadata, getImageInfo($path) ?? []);
+        }
+
+        // Extract executable metadata if exiftool is available.
+        if (!$fileInfo->isDir() && !empty($exiftoolPath) && $category === 'Executable') {
+            $metadata = array_merge($metadata, getExecutableInfo($path, $exiftoolPath));
+        }
+
+        // Extract full exiftool data for all files if exiftool is available.
+        if (!$fileInfo->isDir() && !empty($exiftoolPath)) {
+            $exiftoolJson = getExiftoolJson($path, $exiftoolPath);
         }
 
         // Prepare parameters for the database upsert operation.
@@ -566,6 +607,7 @@ try {
             'partition_number' => $partitionNumber, // The partition number for the file.
             'product_name' => $metadata['product_name'],
             'product_version' => $metadata['product_version'],
+            'exiftool_json' => $exiftoolJson,
         ];
 
         // Calculate MD5 hash if enabled and the current item is a file (not a directory).

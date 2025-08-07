@@ -1,6 +1,34 @@
 <?php
 require 'header.php';
 
+// --- Exif Data Viewer ---
+$exif_file_id = filter_input(INPUT_GET, 'view_exif', FILTER_VALIDATE_INT);
+$exif_data = null;
+$exif_error = '';
+if ($exif_file_id) {
+    try {
+        $stmt = $pdo->prepare("SELECT path, exiftool_json FROM st_files WHERE id = ?");
+        $stmt->execute([$exif_file_id]);
+        $file_data = $stmt->fetch();
+
+        if ($file_data && !empty($file_data['exiftool_json'])) {
+            $json_data = json_decode($file_data['exiftool_json'], true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($json_data[0])) {
+                $exif_data = $json_data[0];
+                // Remove the source file from the data to not repeat it
+                unset($exif_data['SourceFile']);
+            } else {
+                $exif_error = 'Invalid JSON format in the database.';
+            }
+        } else {
+            $exif_error = 'No EXIF data found for this file.';
+        }
+    } catch (\PDOException $e) {
+        $exif_error = 'Error fetching EXIF data.';
+        log_error("EXIF Fetch Error: " . $e->getMessage());
+    }
+}
+
 // --- Search & Pagination Configuration ---
 $search_params = [
     'filename' => trim($_GET['filename'] ?? ''), // This now accepts filename, path, or MD5
@@ -121,6 +149,19 @@ try {
 
 <h1>Advanced File Search</h1>
 
+<?php if ($exif_data): ?>
+<div class="exif-viewer">
+    <h2>EXIF Data for: <?= htmlspecialchars($file_data['path']) ?></h2>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => null])) ?>" class="close-exif">Close</a>
+    <pre><?= htmlspecialchars(print_r($exif_data, true)) ?></pre>
+</div>
+<?php elseif ($exif_error): ?>
+<div class="exif-viewer error">
+    <p><?= htmlspecialchars($exif_error) ?></p>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => null])) ?>">Close</a>
+</div>
+<?php endif; ?>
+
 <form method="GET" action="files.php" class="search-container" style="flex-direction: column; gap: 20px;">
     <div style="display: flex; gap: 10px;">
         <input type="text" name="filename" placeholder="Search by filename, path, or MD5 hash..." value="<?= htmlspecialchars($search_params['filename']) ?>">
@@ -181,6 +222,7 @@ try {
                     <th>Product Name</th>
                     <th>Product Version</th>
                     <th>MD5 Hash</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -214,6 +256,13 @@ try {
                         <td>
                             <?php if (!empty($file['md5_hash'])): ?>
                                 <a href="files.php?filename=<?= htmlspecialchars($file['md5_hash']) ?>" title="Find duplicates"><?= htmlspecialchars($file['md5_hash']) ?></a>
+                            <?php else: ?>
+                                —
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if (!empty($file['exiftool_json'])): ?>
+                                <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => $file['id']])) ?>">View EXIF</a>
                             <?php else: ?>
                                 —
                             <?php endif; ?>
