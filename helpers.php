@@ -43,3 +43,33 @@ function render_progress_bar(float $percentage_used): string
 </div>
 HTML;
 }
+
+/**
+ * Formats a duration in seconds into a human-readable format.
+ */
+function formatDuration(int $seconds): string
+{
+    if ($seconds < 0) {
+        return 'N/A';
+    }
+    if ($seconds == 0) {
+        return '0s';
+    }
+
+    $h = floor($seconds / 3600);
+    $m = floor(($seconds % 3600) / 60);
+    $s = $seconds % 60;
+
+    $parts = [];
+    if ($h > 0) {
+        $parts[] = "{$h}h";
+    }
+    if ($m > 0) {
+        $parts[] = "{$m}m";
+    }
+    if ($s > 0 || empty($parts)) {
+        $parts[] = "{$s}s";
+    }
+
+    return implode(' ', $parts);
+}

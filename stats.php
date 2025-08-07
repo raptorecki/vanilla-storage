@@ -4,6 +4,7 @@ require 'header.php';
 // Initialize stats array with default values to prevent errors on display
 $stats = [
     'total_drives' => 0,
+    'dead_drives' => 0,
     'total_capacity_gb' => 0,
     'total_files' => 0,
     'total_used_bytes' => 0,
@@ -24,6 +25,7 @@ try {
             COUNT(id) AS total_drives,
             SUM(size) AS total_capacity_gb
         FROM st_drives
+        WHERE dead = 0
     ")->fetch();
 
     if ($drive_stats) {
@@ -90,6 +92,7 @@ try {
                 st_drives d
             LEFT JOIN
                 st_files f ON d.id = f.drive_id AND f.is_directory = 0 AND f.date_deleted IS NULL
+            WHERE d.dead = 0
             GROUP BY
                 d.id, d.name, d.size
         )

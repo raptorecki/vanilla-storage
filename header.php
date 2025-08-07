@@ -3,30 +3,7 @@ session_start(); // Start the session to handle flash messages
 
 require_once __DIR__ . '/helpers/error_logger.php';
 require_once 'database.php';
-
-// --- Helper Functions ---
-
-/**
- * Formats a size in gigabytes into a more readable format (GB or TB).
- */
-function formatSize(int $sizeInGB): string
-{
-    if ($sizeInGB >= 1000) {
-        return round($sizeInGB / 1000, 2) . ' TB';
-    }
-    return $sizeInGB . ' GB';
-}
-
-/**
- * Formats a size in bytes into a more readable format (B, KB, MB, GB, TB).
- */
-function formatBytes(int $bytes, int $precision = 2): string
-{
-    if ($bytes <= 0) return '0 B';
-    $base = log($bytes, 1024);
-    $suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    return round(pow(1024, $base - floor($base)), $precision) . ' ' . $suffixes[floor($base)];
-}
+require_once 'helpers.php';
 
 $current_page = basename($_SERVER['PHP_SELF']);
 ?>
@@ -311,12 +288,12 @@ $current_page = basename($_SERVER['PHP_SELF']);
 <body>
 <div class="logo">
  ___      ___  __      _____  ___    __    ___      ___            __            ________  ___________  ______     _______        __       _______    _______ 
-|"  \    /"  |/""\    (\"   \|"  \  |" \  |"  |    |"  |          /""\          /"       )("     _   ")/    " \   /"      \      /""\     /" _   "|  /"     "|
- \   \  //  //    \   |.\\   \    | ||  | ||  |    ||  |         /    \        (:   \___/  )__/  \\__/// ____  \ |:        |    /    \   (: ( \___) (: ______)
-  \\  \/. .//' /\  \  |: \.   \\  | |:  | |:  |    |:  |        /' /\  \        \___  \       \\_ /  /  /    ) :)|_____/   )   /' /\  \   \/ \       \/    |  
-   \.    ////  __'  \ |.  \    \. | |.  |  \  |___  \  |___    //  __'  \        __/  \\      |.  | (: (____/ //  //      /   //  __'  \  //  \ ___  // ___)_ 
-    \\   //   /  \\  \|    \    \ | /\  |\( \_|:  \( \_|:  \  /   /  \\  \      /" \   :)     \:  |  \        /  |:  __   \  /   /  \\  \(:   _(  _|(:      "|
-     \__/(___/    \___)\___|\____\)(__\_|_)\_______)\_______)(___/    \___)    (_______/       \__|   \"_____/   |__|  \___)(___/    \___)\_______)  \_______)
+|"  \    /"  |/""\    ("   \|"  \  |" \  |"  |    |"  |          /""\          /"       )("     _   ")/    " \   /"      \      /""\     /" _   "|  /"     "|
+ \   \  //  //    \   |.\   \    | ||  | ||  |    ||  |         /    \        (:   \___/  )__/  \__/// ____  \ |:        |    /    \   (: ( \___) (: ______)
+  \\  \/. .//' /\  \  |: \.   \  | |:  | |:  |    |:  |        /' /\  \        \___  \       \_ /  /  /    ) :)|_____/   )   /' /\  \   \/ \       \/    |  
+   \.    ////  __'  \ |.  \    . | |.  |  \  |___  \  |___    //  __'  \        __/  \      |.  | (: (____/ //  //      /   //  __'  \  //  \ ___  // ___)_ 
+    \\   //   /  \  \|    \    \ | /\  |\( \_|:  \( \_|:  \  /   /  \  \      /" \   :)     \:  |  \        /  |:  __   \  /   /  \  \(:   _(  _|(:      "|
+     \__/(___/    \___)\___|\____\)(__\_|_)\_______)\_______)(___/    \___)    (_______/       \__|   "_____/   |__|  \___)(___/    \___)\_______)  \_______)
                                                                                                                                                                
  </div>
 <nav>
