@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_drive'])) {
 require 'header.php';
 
 // --- Sorting Logic ---
-$allowed_columns = ['id', 'an_serial', 'name', 'legacy_name', 'vendor', 'model', 'model_number', 'size', 'serial', 'firmware', 'smart', 'summary', 'pair_name', 'dead', 'online', 'offsite', 'encrypted', 'empty', 'filesystem', 'scan_status', 'date_added', 'date_updated'];
+$allowed_columns = ['id', 'an_serial', 'name', 'legacy_name', 'vendor', 'model', 'model_number', 'size', 'serial', 'firmware', 'smart', 'summary', 'pair_name', 'dead', 'online', 'offsite', 'encrypted', 'empty', 'filesystem', 'scan_status', 'date_added', 'date_updated', 'last_scan'];
 $sort_column = $_GET['sort'] ?? 'id';
 if (!in_array($sort_column, $allowed_columns)) $sort_column = 'id';
 $sort_direction = strtolower($_GET['dir'] ?? 'asc');
@@ -80,7 +80,8 @@ try {
                 WHEN d1.dead = 1 OR d1.empty = 1 THEN 'N/A'
                 WHEN EXISTS (SELECT 1 FROM st_scans s WHERE s.drive_id = d1.id) THEN 'Done'
                 ELSE 'Required'
-            END AS scan_status
+            END AS scan_status,
+            (SELECT MAX(scan_date) FROM st_scans WHERE drive_id = d1.id) AS last_scan
         FROM st_drives d1 
         LEFT JOIN st_drives d2 ON d1.pair_id = d2.id
     ";
@@ -172,7 +173,7 @@ try {
                     'vendor' => 'Vendor', 'model' => 'Model', 'model_number' => 'Model No.', 'size' => 'Size', 'serial' => 'Serial', 'firmware' => 'Firmware',
                     'smart' => 'SMART', 'summary' => 'Summary', 'dead' => 'Dead', 'online' => 'Online', 'offsite' => 'Offsite',
                     'encrypted' => 'Encrypted', 'empty' => 'Empty', 'filesystem' => 'Filesystem', 'pair_name' => 'Paired With',
-                    'scan_status' => 'Scan', 'date_added' => 'Added', 'date_updated' => 'Last Updated', 'actions' => 'Actions'
+                    'scan_status' => 'Scan', 'date_added' => 'Added', 'date_updated' => 'Last Updated', 'last_scan' => 'Last Scan', 'actions' => 'Actions'
                 ];
                 foreach ($headers as $col => $title):
                     $is_sorted_column = ($sort_column === $col);

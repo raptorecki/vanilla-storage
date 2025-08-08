@@ -89,6 +89,8 @@ try {
             SELECT
                 d.id,
                 d.name,
+                d.an_serial,
+                d.serial,
                 d.size AS capacity_gb,
                 (d.size * 1073741824) AS capacity_bytes,
                 IFNULL(SUM(f.size), 0) AS used_bytes
@@ -98,11 +100,13 @@ try {
                 st_files f ON d.id = f.drive_id AND f.is_directory = 0 AND f.date_deleted IS NULL
             WHERE d.dead = 0
             GROUP BY
-                d.id, d.name, d.size
+                d.id, d.name, d.an_serial, d.serial, d.size
         )
         SELECT
             id,
             name,
+            an_serial,
+            serial,
             capacity_gb,
             used_bytes,
             (capacity_bytes - used_bytes) AS free_space_bytes
@@ -111,10 +115,26 @@ try {
 
     $stats['drives_most_free'] = $pdo->query($drive_usage_query . " ORDER BY free_space_bytes DESC LIMIT 5")->fetchAll();
     $stats['drives_least_free'] = $pdo->query($drive_usage_query . " ORDER BY free_space_bytes ASC LIMIT 5")->fetchAll();
+    $stats['drives_most_data'] = $pdo->query($drive_usage_query . " ORDER BY used_bytes DESC LIMIT 5")->fetchAll();
+
+    // 6. Get drives that require a scan
+    $stats['drives_scan_required'] = $pdo->query("
+        SELECT
+            d.id,
+            d.name,
+            d.an_serial,
+            d.serial
+        FROM
+            st_drives d
+        LEFT JOIN
+            st_scans s ON d.id = s.drive_id
+        WHERE
+            d.dead = 0 AND d.empty = 0 AND s.scan_date IS NULL
+    ")->fetchAll();
 
 } catch (\PDOException $e) {
     log_error("Database Error in stats.php: " . $e->getMessage());
-    $error_message = "An unexpected database error occurred while fetching statistics. Please try again.";
+    $error_message = "An unexpected database error occurred while fetching statistics. Please try again. Details: " . $e->getMessage();
 }
 ?>
 
@@ -129,6 +149,7 @@ try {
         <div class="stat-card"><h3>Total Storage Capacity</h3><p><?= formatSize((int)$stats['total_capacity_gb']) ?></p></div>
         <div class="stat-card"><h3>Total Storage Used</h3><p><?= formatBytes((int)$stats['total_used_bytes']) ?></p></div>
         <div class="stat-card"><h3>Total Number of Files</h3><p><?= number_format($stats['total_files']) ?></p></div>
+        <div class="stat-card"><h3>Drives With Scan Required</h3><p><?= number_format(count($stats['drives_scan_required'])) ?></p></div>
     </div>
 
     <h2>Files by Category</h2>
@@ -159,7 +180,7 @@ try {
                 <tr>
                     <th>File Path</th>
                     <th>Size</th>
-                    <th>Drive</th>
+                    <th>Name</th>
                 </tr>
             </thead>
             <tbody>
@@ -181,77 +202,107 @@ try {
     <?php endif; ?>
 
     <div class="stats-grid" style="margin-top: 40px;">
+        
         <div>
-            <h2>Drives With Most Free Space</h2>
-            <?php if (empty($stats['drives_most_free'])): ?>
-                <p>No drive data available.</p>
-            <?php else: ?>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Drive</th>
-                            <th>Free Space</th>
-                            <th>Used %</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($stats['drives_most_free'] as $drive): ?>
+            <details>
+                <summary>Drives With Scan Required</summary>
+                <?php if (empty($stats['drives_scan_required'])): ?>
+                    <p>No drives require a scan.</p>
+                <?php else: ?>
+                    <table>
+                        <thead>
                             <tr>
-                                <td><a href="browse.php?drive_id=<?= htmlspecialchars($drive['id']) ?>"><?= htmlspecialchars($drive['name']) ?></a></td>
-                                <td><?= formatBytes($drive['free_space_bytes']) ?></td>
-                                <td style="width: 150px;"><?php
-                                    $capacity_bytes = $drive['capacity_gb'] * 1073741824;
-                                    $percentage_used = ($capacity_bytes > 0) ? ($drive['used_bytes'] / $capacity_bytes) * 100 : 0;
-                                    $percentage_rounded = round($percentage_used, 1);
-
-                                    $bar_color_class = 'green';
-                                    if ($percentage_used >= 85) {
-                                        $bar_color_class = 'red';
-                                    } elseif ($percentage_used >= 50) {
-                                        $bar_color_class = 'yellow';
-                                    }
-                                ?><div class="progress-bar-container" title="<?= $percentage_rounded ?>% Used">
-                                        <div class="progress-bar <?= $bar_color_class ?>" style="width: <?= $percentage_used ?>%;"></div>
-                                        <span class="progress-bar-text"><?= $percentage_rounded ?>%</span>
-                                    </div></td>
+                                <th>AN Serial</th>
+                                <th>Name</th>
+                                <th>Serial</th>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($stats['drives_scan_required'] as $drive): ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($drive['an_serial']) ?></td>
+                                    <td><a href="browse.php?drive_id=<?= htmlspecialchars($drive['id']) ?>"><?= htmlspecialchars($drive['name']) ?></a></td>
+                                    <td><?= htmlspecialchars($drive['serial']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            </details>
         </div>
         <div>
-            <h2>Drives With Least Free Space</h2>
-            <?php if (empty($stats['drives_least_free'])): ?>
-                <p>No drive data available.</p>
-            <?php else: ?>
-                <table>
-                    <thead><tr><th>Drive</th><th>Free Space</th><th>Used %</th></tr></thead>
-                    <tbody>
-                        <?php foreach ($stats['drives_least_free'] as $drive): ?>
+            <details>
+                <summary>Drives With Most Free Space</summary>
+                <?php if (empty($stats['drives_most_free'])): ?>
+                    <p>No drive data available.</p>
+                <?php else: ?>
+                    <table>
+                        <thead>
                             <tr>
-                                <td><a href="browse.php?drive_id=<?= htmlspecialchars($drive['id']) ?>"><?= htmlspecialchars($drive['name']) ?></a></td>
-                                <td><?= formatBytes($drive['free_space_bytes']) ?></td>
-                                <td style="width: 150px;"><?php
-                                    $capacity_bytes = $drive['capacity_gb'] * 1073741824;
-                                    $percentage_used = ($capacity_bytes > 0) ? ($drive['used_bytes'] / $capacity_bytes) * 100 : 0;
-                                    $percentage_rounded = round($percentage_used, 1);
-
-                                    $bar_color_class = 'green';
-                                    if ($percentage_used >= 85) {
-                                        $bar_color_class = 'red';
-                                    } elseif ($percentage_used >= 50) {
-                                        $bar_color_class = 'yellow';
-                                    }
-                                ?><div class="progress-bar-container" title="<?= $percentage_rounded ?>% Used">
-                                        <div class="progress-bar <?= $bar_color_class ?>" style="width: <?= $percentage_used ?>%;"></div>
-                                        <span class="progress-bar-text"><?= $percentage_rounded ?>%</span>
-                                    </div></td>
+                                <th>Name</th>
+                                <th>AN Serial</th>
+                                <th>Serial</th>
+                                <th>Free Space</th>
+                                <th>Used %</th>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($stats['drives_most_free'] as $drive): ?>
+                                <tr>
+                                    <td><a href="browse.php?drive_id=<?= htmlspecialchars($drive['id']) ?>"><?= htmlspecialchars($drive['name']) ?></a></td>
+                                    <td><?= htmlspecialchars($drive['an_serial']) ?></td>
+                                    <td><?= htmlspecialchars($drive['serial']) ?></td>
+                                    <td><?= formatBytes($drive['free_space_bytes']) ?></td>
+                                    <td style="width: 150px;"><?php
+                                        $capacity_bytes = $drive['capacity_gb'] * 1073741824;
+                                        $percentage_used = ($capacity_bytes > 0) ? ($drive['used_bytes'] / $capacity_bytes) * 100 : 0;
+                                        $percentage_rounded = round($percentage_used, 1);
+
+                                        $bar_color_class = 'green';
+                                        if ($percentage_used >= 85) {
+                                            $bar_color_class = 'red';
+                                        } elseif ($percentage_used >= 50) {
+                                            $bar_color_class = 'yellow';
+                                        }
+                                    ?><div class="progress-bar-container" title="<?= $percentage_rounded ?>% Used">
+                                            <div class="progress-bar <?= $bar_color_class ?>" style="width: <?= $percentage_used ?>%;"></div>
+                                            <span class="progress-bar-text"><?= $percentage_rounded ?>%</span>
+                                        </div></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            </details>
+        </div>
+        <div>
+            <details>
+                <summary>Drives With Most Data</summary>
+                <?php if (empty($stats['drives_most_data'])): ?>
+                    <p>No drive data available.</p>
+                <?php else: ?>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>AN Serial</th>
+                                <th>Serial</th>
+                                <th>Used Space</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($stats['drives_most_data'] as $drive): ?>
+                                <tr>
+                                    <td><a href="browse.php?drive_id=<?= htmlspecialchars($drive['id']) ?>"><?= htmlspecialchars($drive['name']) ?></a></td>
+                                    <td><?= htmlspecialchars($drive['an_serial']) ?></td>
+                                    <td><?= htmlspecialchars($drive['serial']) ?></td>
+                                    <td><?= formatBytes($drive['used_bytes']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            </details>
         </div>
     </div>
 <?php endif; ?>
