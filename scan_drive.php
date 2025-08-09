@@ -166,33 +166,57 @@ if (!$resumeScan) {
     echo "Starting new scan (scan_id: {$scanId}) for drive_id: {$driveId} at '{$mountPoint}'...\n";
 }
 
+// Global flag to indicate if the script has been interrupted
+$GLOBALS['interrupted'] = false;
+
 // --- Interruption Handling ---
 // Global variable to hold the scan ID for the shutdown function
 $GLOBALS['scanId'] = $scanId;
 $GLOBALS['pdo'] = $pdo;
+$GLOBALS['current_scanned_path'] = null;
 
-register_shutdown_function('handle_shutdown');
-if (function_exists('pcntl_async_signals')) {
-    pcntl_async_signals(true);
-    pcntl_signal(SIGINT, 'handle_shutdown'); // Ctrl+C
-    pcntl_signal(SIGTERM, 'handle_shutdown'); // Kill
-}
-
-function handle_shutdown() {
-    global $pdo, $scanId;
-    // This function will be called on script exit
-    $error = error_get_last();
-    // We only mark as interrupted if it's a fatal error or signal
-    if ($scanId && ($error !== null || php_sapi_name() === 'cli')) {
-        try {
-            $stmt = $pdo->prepare("UPDATE st_scans SET status = 'interrupted' WHERE scan_id = ? AND status = 'running'");
-            $stmt->execute([$scanId]);
-            echo "\nScan interrupted. Run with --resume to continue.\n";
-        } catch (PDOException $e) {
-            // Cannot connect to DB, nothing to do.
-        }
+// Define the signal handler
+function signal_handler($signo) {
+    global $interrupted;
+    if ($signo === SIGINT || $signo === SIGTERM) {
+        $interrupted = true;
     }
 }
+
+// Register the signal handler
+if (function_exists('pcntl_async_signals')) {
+    pcntl_async_signals(true);
+    pcntl_signal(SIGINT, 'signal_handler'); // Ctrl+C
+    pcntl_signal(SIGTERM, 'signal_handler'); // Kill
+}
+
+// Define a final shutdown function that handles cleanup
+register_shutdown_function(function() use ($scanId, $pdo) {
+    global $interrupted;
+    // Check if the script was interrupted or if there was a fatal error
+    $error = error_get_last();
+    $isFatalError = ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR]));
+
+    if ($scanId && ($interrupted || $isFatalError)) {
+        try {
+            // Ensure transaction is rolled back if still active
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            // Access global current_scanned_path
+            global $current_scanned_path;
+            $stmt = $pdo->prepare("UPDATE st_scans SET status = 'interrupted', last_scanned_path = ? WHERE scan_id = ? AND status = 'running'");
+            $stmt->execute([$current_scanned_path, $scanId]);
+            echo "\nScan interrupted. Run with --resume to continue.\n";
+        } catch (PDOException $e) {
+            // Log the error for debugging
+            error_log("PDOException in shutdown function: " . $e->getMessage());
+            echo "Error updating scan status during interruption: " . $e->getMessage() . "\n";
+        }
+    }
+    // If the script completed normally, the status would have been set to 'completed' already
+    // and $GLOBALS['scanId'] would have been unset.
+});
 
 // --- Drive Serial Number and Info Verification ---
 echo "Verifying drive serial number...\n";
@@ -737,6 +761,7 @@ try {
     foreach ($iterator as $fileInfo) {
         $path = $fileInfo->getPathname();
         $relativePath = substr($path, strlen($mountPoint));
+        $GLOBALS['current_scanned_path'] = $relativePath; // Update current scanned path
 
         if (!$foundResumePath) {
             if ($relativePath === $lastScannedPath) {
@@ -744,6 +769,13 @@ try {
                 echo "  > Resumed scan, found last path. Continuing...\n";
             }
             continue; // Skip until we find the last scanned path
+        }
+
+        // Check for interruption flag
+        if ($GLOBALS['interrupted']) {
+            echo "\nInterruption detected. Exiting scan loop gracefully.\n";
+            // The shutdown function will handle marking the scan as interrupted.
+            exit(0); // Exit the script immediately
         }
 
         $stats['scanned']++;
