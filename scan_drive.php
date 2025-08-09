@@ -136,7 +136,7 @@ if (!is_dir($mountPoint)) {
 $scanId = null;
 $lastScannedPath = null;
 $stats = [
-    'scanned' => 0, 'added' => 0, 'updated' => 0, 'deleted' => 0,
+    'scanned' => 0, 'added' => 0, 'updated' => 0, 'deleted' => 0, 'skipped' => 0,
     
 ];
 
@@ -154,6 +154,7 @@ if ($resumeScan) {
         $stats['added'] = $lastScan['new_files_added'];
         $stats['updated'] = $lastScan['existing_files_updated'];
         $stats['deleted'] = $lastScan['files_marked_deleted'];
+        $stats['skipped'] = $lastScan['files_skipped']; // Load skipped count
         $stats['thumbnails_created'] = $lastScan['thumbnails_created'];
         $stats['thumbnails_failed'] = $lastScan['thumbnail_creations_failed'];
 
@@ -713,11 +714,11 @@ function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats):
 
         // Update the scan record with the latest stats
         $updateStmt = $pdo->prepare(
-            "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?\n WHERE scan_id = ?"
+            "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?, files_skipped = ?\n WHERE scan_id = ?"
         );
         $updateStmt->execute([
             $lastPath, $stats['scanned'], $stats['added'], $stats['updated'],
-            $stats['deleted'], $scanId
+            $stats['deleted'], $stats['skipped'], $scanId
         ]);
 
         $filesInTransaction = 0;
@@ -884,6 +885,7 @@ try {
             $checkStmt = $pdo->prepare("SELECT 1 FROM st_files WHERE drive_id = ? AND path_hash = ?");
             $checkStmt->execute([$driveId, hash('sha256', $relativePath)]);
             if ($checkStmt->fetch()) {
+                $stats['skipped']++; // Increment the counter
                 // Optional: Add a message to show it's being skipped
                 // echo "Skipping existing file: $relativePath\n";
                 continue;
@@ -1010,8 +1012,8 @@ try {
 
     // Final step: Mark the scan as completed
     $duration = microtime(true) - $startTime;
-    $finalStmt = $pdo->prepare("UPDATE st_scans SET status = 'completed', scan_duration = ? WHERE scan_id = ?");
-    $finalStmt->execute([round($duration), $scanId]);
+    $finalStmt = $pdo->prepare("UPDATE st_scans SET status = 'completed', scan_duration = ?, files_skipped = ? WHERE scan_id = ?");
+    $finalStmt->execute([round($duration), $stats['skipped'], $scanId]);
     
     // Unset the global scanId to prevent the shutdown function from marking a completed scan as interrupted
     $GLOBALS['scanId'] = null;
@@ -1054,5 +1056,6 @@ echo "Total Items Scanned:  " . number_format($finalStats['total_items_scanned']
 echo "New Files Added:      " . number_format($finalStats['new_files_added']) . "\n";
 echo "Existing Files Updated: " . number_format($finalStats['existing_files_updated']) . "\n";
 echo "Files Marked Deleted: " . number_format($finalStats['files_marked_deleted']) . "\n";
+echo "Existing Files Skipped: " . number_format($finalStats['files_skipped']) . "\n";
 echo "Scan Duration:        {$durationFormatted}\n";
 echo "---------------------\n";
