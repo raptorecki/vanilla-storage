@@ -994,14 +994,12 @@ try {
                         $stats['thumbnails_created']++;
                         echo " (Thumb ID: {$fileId})"; // Append thumb info to the line
                         if ($debugMode) {
-                            echo "
-DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}";
+                            echo " DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}";
                         }
                     } else {
                         $stats['thumbnails_failed']++;
                         if ($debugMode) {
-                            echo "
-DEBUG: Thumbnail creation failed for {$relativePath}";
+                            echo " DEBUG: Thumbnail creation failed for {$relativePath}";
                         }
                     }
                 } else {
