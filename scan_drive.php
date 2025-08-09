@@ -957,50 +957,64 @@ try {
             continue;
         }
 
-        // Execute the prepared upsert statement.
+        // 1. Execute the main database operation
         $upsertStmt->execute($fileData);
         $rowCount = $upsertStmt->rowCount();
 
-        // Get the file_id for thumbnail generation (removed redundant fetch)
-        $fileIdStmt = $pdo->prepare("SELECT id FROM st_files WHERE drive_id = ? AND path_hash = ?");
-        $fileIdStmt->execute([$driveId, hash('sha256', $relativePath)]);
-        $fileId = $fileIdStmt->fetchColumn();
-
-        // Initialize thumbnail ID display
-        $thumbnailIdDisplay = '';
-
-        if ($fileId && $generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
-            $thumbnailRelPath = getThumbnailPath($fileId);
-            if (!empty($thumbnailRelPath)) {
-                $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
-                if (createThumbnail($path, $thumbDestination)) {
-                    $updateThumbnailStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
-                    $updateThumbnailStmt->execute([$thumbnailRelPath, $fileId]);
-                    $stats['thumbnails_created']++;
-                    $thumbnailIdDisplay = " (Thumb ID: {$fileId})"; // Set display string on success
-                    if ($debugMode) {
-                        echo "DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}\n";
-                    }
-                } else {
-                    $stats['thumbnails_failed']++;
-                    if ($debugMode) {
-                        echo "DEBUG: Thumbnail creation failed for {$relativePath}\n";
-                    }
-                }
-            } else {
-                $stats['thumbnails_failed']++;
-            }
-        }
-        // Append thumbnail ID display to the progress message
-        echo $progressMessage . $thumbnailIdDisplay . "\n";
-        if ($debugMode && $category === 'Image' && !$fileInfo->isDir()) {
-            echo "DEBUG: Thumbnail conditions: fileId=" . ($fileId ? 'true' : 'false') . ", generateThumbnails=" . ($generateThumbnails ? 'true' : 'false') . ", category='{$category}', isDir=" . ($fileInfo->isDir() ? 'true' : 'false') . "\n";
-        }
-
+        // Update stats based on whether it was an INSERT (1) or UPDATE (2)
         if ($rowCount === 1) $stats['added']++;
         elseif ($rowCount === 2) $stats['updated']++;
 
-        // Commit progress periodically
+        // 2. Display the main progress message first
+        echo $progressMessage; // Display what was just scanned
+
+        // 3. Handle thumbnail generation ONLY if necessary
+        if ($generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
+            $fileId = 0;
+            // For newly inserted files, get the ID for free
+            if ($rowCount === 1) {
+                $fileId = $pdo->lastInsertId();
+            }
+            // For updated files, we must run a SELECT to get the existing ID
+            elseif ($rowCount === 2) {
+                $fileIdStmt = $pdo->prepare("SELECT id FROM st_files WHERE drive_id = ? AND path_hash = ?");
+                $fileIdStmt->execute([$driveId, $fileData['path_hash']]);
+                $fileId = $fileIdStmt->fetchColumn();
+            }
+
+            // 4. If we have a valid fileId, proceed with thumbnailing
+            if ($fileId) {
+                $thumbnailRelPath = getThumbnailPath($fileId);
+                if (!empty($thumbnailRelPath)) {
+                    $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
+                    if (createThumbnail($path, $thumbDestination)) {
+                        // Update the file record with the new thumbnail path
+                        $updateThumbnailStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
+                        $updateThumbnailStmt->execute([$thumbnailRelPath, $fileId]);
+                        $stats['thumbnails_created']++;
+                        echo " (Thumb ID: {$fileId})"; // Append thumb info to the line
+                        if ($debugMode) {
+                            echo "
+DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}";
+                        }
+                    } else {
+                        $stats['thumbnails_failed']++;
+                        if ($debugMode) {
+                            echo "
+DEBUG: Thumbnail creation failed for {$relativePath}";
+                        }
+                    }
+                } else {
+                    $stats['thumbnails_failed']++;
+                }
+            }
+        }
+
+        // 5. Add a final newline to complete the progress indicator line
+        echo "
+";
+
+        // Periodically commit the transaction
         commit_progress($pdo, $scanId, $relativePath, $stats);
     }
 
