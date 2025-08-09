@@ -51,7 +51,8 @@ $commitInterval = 10; // Commit progress to the database every 10 files.
 // Initialize flags with default values.
 $calculateMd5 = true;
 $updateDriveInfo = true;
-$generateThumbnails = true;
+$generateThumbnails = true; // Default to true for in-line generation
+$useExternalThumbGen = false; // New flag for external generation
 $resumeScan = false;
 $skipExisting = false;
 $debugMode = false; // New debug flag
@@ -61,6 +62,7 @@ $flagMap = [
     '--no-md5' => &$calculateMd5,
     '--no-drive-info-update' => &$updateDriveInfo,
     '--no-thumbnails' => &$generateThumbnails,
+    '--use-external-thumb-gen' => &$useExternalThumbGen,
     '--resume' => &$resumeScan,
     '--skip-existing' => &$skipExisting,
     '--debug' => &$debugMode, // New debug flag
@@ -79,6 +81,10 @@ foreach ($flagMap as $flag => &$variable) {
     }
 }
 
+// If external thumbnail generation is requested, disable in-line generation.
+if ($useExternalThumbGen) {
+    $generateThumbnails = false;
+}
 
 // Re-index the arguments array after removing flags.
 $args = array_values($args);
@@ -89,6 +95,7 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --no-md5                Skip MD5 hash calculation for a faster scan.\n" .
     "  --no-drive-info-update  Skip updating drive model, serial, and filesystem type.\n" .
     "  --no-thumbnails         Skip generating thumbnails for image files.\n" .
+    "  --use-external-thumb-gen Use external script for thumbnail generation (disables in-line).\n" .
     "  --resume                Resume an interrupted scan for the specified drive.\n" .
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
     "  --debug                 Enable verbose debug output.\n" .
@@ -130,7 +137,7 @@ $scanId = null;
 $lastScannedPath = null;
 $stats = [
     'scanned' => 0, 'added' => 0, 'updated' => 0, 'deleted' => 0,
-    'thumbnails_created' => 0, 'thumbnails_failed' => 0, 'thumbnails_size' => 0,
+    
 ];
 
 if ($resumeScan) {
@@ -563,43 +570,7 @@ function getExecutableInfo(string $filePath, string $exiftoolPath): array
     ];
 }
 
-/**
- * Queues a file for thumbnail generation.
- *
- * @param PDO $pdo The database connection object.
- * @param int $fileId The ID of the file to queue.
- * @return bool True on success, false on failure.
- */
-function queueThumbnail(PDO $pdo, int $fileId): bool
-{
-    try {
-        global $debugMode; // Access the global debugMode variable
-        if ($debugMode) { echo "  > DEBUG: Inside queueThumbnail for fileId: {$fileId}\n"; }
 
-        // Check if the file is already in the queue (pending or completed)
-        $checkStmt = $pdo->prepare("SELECT 1 FROM st_thumbnail_queue WHERE file_id = ? AND (status = 'pending' OR status = 'completed')");
-        $checkStmt->execute([$fileId]);
-        if ($checkStmt->fetch()) {
-            if ($debugMode) { echo "  > DEBUG: fileId {$fileId} already in queue or completed. Skipping insert.\n"; }
-            // File already in queue or thumbnail already generated, no need to re-queue
-            return true;
-        }
-
-        if ($debugMode) { echo "  > DEBUG: fileId {$fileId} not found in queue. Attempting insert.\n"; }
-
-        $stmt = $pdo->prepare(
-            "INSERT INTO st_thumbnail_queue (file_id, status) VALUES (?, 'pending')"
-        );
-        $result = $stmt->execute([$fileId]);
-
-        if ($debugMode) { echo "  > DEBUG: Insert result for fileId {$fileId}: " . ($result ? 'true' : 'false') . "\n"; }
-        return $result;
-    } catch (PDOException $e) {
-        log_error("Failed to queue thumbnail for file_id {$fileId}: " . $e->getMessage());
-        if ($debugMode) { echo "  > DEBUG: PDOException in queueThumbnail for fileId {$fileId}: " . $e->getMessage() . "\n"; }
-        return false;
-    }
-}
 
 // --- File Type Categorization ---
 // A map of common file extensions to their general categories.
@@ -622,6 +593,113 @@ $extensionMap = [
     'exe' => 'Executable', 'msi' => 'Executable', 'bat' => 'Executable', 'sh' => 'Executable',
 ];
 
+/**
+ * Generates a nested path for a thumbnail based on the file ID.
+ *
+ * @param int $fileId The unique ID of the file.
+ * @return string The relative path for the thumbnail, e.g., "thumbnails/00/00/12/000012345.jpg".
+ */
+function getThumbnailPath(int $fileId): string
+{
+    // Pad the ID to 9 digits with leading zeros
+    $paddedId = str_pad($fileId, 9, '0', STR_PAD_LEFT);
+
+    // Create the path parts
+    $part1 = substr($paddedId, 0, 2);
+    $part2 = substr($paddedId, 2, 2);
+    $part3 = substr($paddedId, 4, 2);
+
+    $directoryPath = "thumbnails/{$part1}/{$part2}/{$part3}";
+
+    // The full path to the directory on the filesystem
+    $fullDirectoryPath = __DIR__ . '/' . $directoryPath;
+
+    // Ensure the directory exists before saving the file
+    if (!is_dir($fullDirectoryPath)) {
+        // The 'true' parameter creates nested directories recursively
+        if (!mkdir($fullDirectoryPath, 0755, true)) {
+            // Handle the error case where directory creation fails
+            log_error("Failed to create thumbnail directory: {$fullDirectoryPath}");
+            return ''; // Return empty string on failure
+        }
+    }
+
+    return "{$directoryPath}/{$paddedId}.jpg";
+}
+
+/**
+ * Creates a thumbnail for an image file.
+ * @param string $sourcePath The full path to the source image.
+ * @param string $destinationPath The full path to save the thumbnail.
+ * @param int $maxWidth The maximum width of the thumbnail.
+ * @return bool True on success, false on failure.
+ */
+function createThumbnail(string $sourcePath, string $destinationPath, int $maxWidth = 400): bool
+{
+    if (!extension_loaded('gd')) {
+        log_error("PHP GD extension not loaded. Cannot create thumbnail.");
+        return false;
+    }
+
+    // Ensure the destination directory exists
+    $dir = dirname($destinationPath);
+    if (!is_dir($dir)) {
+        if (!mkdir($dir, 0755, true)) {
+            log_error("Failed to create directory for thumbnail: {$dir}");
+            return false;
+        }
+    }
+
+    list($width, $height, $type) = @getimagesize($sourcePath);
+    if (!$width || !$height) {
+        log_error("Could not get image size for thumbnail: {$sourcePath}");
+        return false;
+    }
+
+    $newWidth = min($width, $maxWidth);
+    $newHeight = floor($height * ($newWidth / $width));
+
+    $thumb = imagecreatetruecolor($newWidth, $newHeight);
+    if ($thumb === false) {
+        log_error("Failed to create true color image for thumbnail: {$sourcePath}");
+        return false;
+    }
+
+    $source = null;
+    switch ($type) {
+        case IMAGETYPE_JPEG:
+            $source = @imagecreatefromjpeg($sourcePath);
+            break;
+        case IMAGETYPE_PNG:
+            $source = @imagecreatefrompng($sourcePath);
+            break;
+        case IMAGETYPE_GIF:
+            $source = @imagecreatefromgif($sourcePath);
+            break;
+        default:
+            log_error("Unsupported image type for thumbnail: {$sourcePath}");
+            return false; // Unsupported image type
+    }
+
+    if ($source === false) {
+        log_error("Failed to create image from source for thumbnail: {$sourcePath}");
+        return false;
+    }
+
+    imagecopyresampled($thumb, $source, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+    $success = imagejpeg($thumb, $destinationPath, 85); // Save as JPEG with 85% quality
+
+    imagedestroy($thumb);
+    imagedestroy($source);
+
+    if (!$success) {
+        log_error("Failed to save thumbnail image: {$destinationPath}");
+    }
+
+    return $success;
+}
+
 // --- Main Scanning Logic ---
 
 // A function to commit the current batch of file updates and record progress.
@@ -637,11 +715,11 @@ function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats):
 
         // Update the scan record with the latest stats
         $updateStmt = $pdo->prepare(
-            "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?, thumbnails_queued = ?,\n                thumbnail_queueing_failed = ?\n            WHERE scan_id = ?"
+            "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?\n WHERE scan_id = ?"
         );
         $updateStmt->execute([
             $lastPath, $stats['scanned'], $stats['added'], $stats['updated'],
-            $stats['deleted'], $stats['thumbnails_queued'], $stats['thumbnails_failed_to_queue'], $scanId
+            $stats['deleted'], $scanId
         ]);
 
         $filesInTransaction = 0;
@@ -823,7 +901,6 @@ try {
                 if (mb_strlen($progressMessage) > $termWidth) {
                     $progressMessage = mb_substr($progressMessage, 0, $termWidth - 4) . '...';
                 }
-                echo $progressMessage . "\n";
 
                 // --- Metadata Extraction ---
                 $extension = strtolower($fileInfo->getExtension());
@@ -884,29 +961,40 @@ try {
         $upsertStmt->execute($fileData);
         $rowCount = $upsertStmt->rowCount();
 
-        // --- Thumbnail Queueing ---
-        if ($generateThumbnails && !$fileInfo->isDir() && $category === 'Image') {
-            if ($debugMode) { echo "  > DEBUG: Attempting to queue thumbnail for: {$relativePath}\n"; }
-            $fileId = $pdo->lastInsertId();
-            if ($debugMode) { echo "  > DEBUG: fileId from lastInsertId(): {$fileId}\n"; }
-            // If the row was updated, lastInsertId will be 0. We need to get the ID.
-            if ($fileId == 0) {
-                $idStmt = $pdo->prepare("SELECT id FROM st_files WHERE drive_id = ? AND path_hash = ?");
-                $idStmt->execute([$driveId, hash('sha256', $relativePath)]);
-                $fileId = $idStmt->fetchColumn();
-                if ($debugMode) { echo "  > DEBUG: fileId from SELECT fallback: {$fileId}\n"; }
-            }
+        // Get the file_id for thumbnail generation (removed redundant fetch)
+        $fileIdStmt = $pdo->prepare("SELECT id FROM st_files WHERE drive_id = ? AND path_hash = ?");
+        $fileIdStmt->execute([$driveId, hash('sha256', $relativePath)]);
+        $fileId = $fileIdStmt->fetchColumn();
 
-            if ($fileId) {
-                if ($debugMode) { echo "  > DEBUG: Valid fileId ({$fileId}) obtained. Calling queueThumbnail.\n"; }
-                if (queueThumbnail($pdo, $fileId)) {
-                    $stats['thumbnails_queued']++;
+        // Initialize thumbnail ID display
+        $thumbnailIdDisplay = '';
+
+        if ($fileId && $generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
+            $thumbnailRelPath = getThumbnailPath($fileId);
+            if (!empty($thumbnailRelPath)) {
+                $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
+                if (createThumbnail($path, $thumbDestination)) {
+                    $updateThumbnailStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
+                    $updateThumbnailStmt->execute([$thumbnailRelPath, $fileId]);
+                    $stats['thumbnails_created']++;
+                    $thumbnailIdDisplay = " (Thumb ID: {$fileId})"; // Set display string on success
+                    if ($debugMode) {
+                        echo "DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}\n";
+                    }
                 } else {
-                    $stats['thumbnails_failed_to_queue']++;
+                    $stats['thumbnails_failed']++;
+                    if ($debugMode) {
+                        echo "DEBUG: Thumbnail creation failed for {$relativePath}\n";
+                    }
                 }
             } else {
-                if ($debugMode) { echo "  > DEBUG: Invalid fileId ({$fileId}) for {$relativePath}. Skipping thumbnail queueing.\n"; }
+                $stats['thumbnails_failed']++;
             }
+        }
+        // Append thumbnail ID display to the progress message
+        echo $progressMessage . $thumbnailIdDisplay . "\n";
+        if ($debugMode && $category === 'Image' && !$fileInfo->isDir()) {
+            echo "DEBUG: Thumbnail conditions: fileId=" . ($fileId ? 'true' : 'false') . ", generateThumbnails=" . ($generateThumbnails ? 'true' : 'false') . ", category='{$category}', isDir=" . ($fileInfo->isDir() ? 'true' : 'false') . "\n";
         }
 
         if ($rowCount === 1) $stats['added']++;
@@ -968,9 +1056,5 @@ echo "Total Items Scanned:  " . number_format($finalStats['total_items_scanned']
 echo "New Files Added:      " . number_format($finalStats['new_files_added']) . "\n";
 echo "Existing Files Updated: " . number_format($finalStats['existing_files_updated']) . "\n";
 echo "Files Marked Deleted: " . number_format($finalStats['files_marked_deleted']) . "\n";
-if ($generateThumbnails) {
-    echo "Thumbnails Queued:   " . number_format($finalStats['thumbnails_queued']) . "\n";
-    echo "Thumbnails Failed to Queue:    " . number_format($finalStats['thumbnail_queueing_failed']) . "\n";
-}
 echo "Scan Duration:        {$durationFormatted}\n";
 echo "---------------------\n";
