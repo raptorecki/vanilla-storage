@@ -196,7 +196,7 @@ if (function_exists('pcntl_async_signals')) {
 }
 
 // Define a final shutdown function that handles cleanup
-register_shutdown_function(function() use ($scanId, $pdo) {
+register_shutdown_function(function() use ($scanId, &$pdo) {
     global $interrupted;
     // Check if the script was interrupted or if there was a fatal error
     $error = error_get_last();
@@ -587,17 +587,10 @@ function queueThumbnail(PDO $pdo, int $fileId): bool
 
         if ($debugMode) { echo "  > DEBUG: fileId {$fileId} not found in queue. Attempting insert.\n"; }
 
-        // Temporarily enable autocommit to ensure this insert is atomic and committed immediately
-        // without affecting the main transaction's state.
-        $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, true);
-
         $stmt = $pdo->prepare(
             "INSERT INTO st_thumbnail_queue (file_id, status) VALUES (?, 'pending')"
         );
         $result = $stmt->execute([$fileId]);
-
-        // Re-disable autocommit
-        $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, false);
 
         if ($debugMode) { echo "  > DEBUG: Insert result for fileId {$fileId}: " . ($result ? 'true' : 'false') . "\n"; }
         return $result;
