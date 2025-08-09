@@ -74,10 +74,6 @@ foreach ($flagMap as $flag => &$variable) {
         unset($args[$key]);
     }
 }
-// For the --no-* flags, the logic is inverted.
-$calculateMd5 = !in_array('--no-md5', array_keys($flagMap)) || $calculateMd5;
-$updateDriveInfo = !in_array('--no-drive-info-update', array_keys($flagMap)) || $updateDriveInfo;
-$generateThumbnails = !in_array('--no-thumbnails', array_keys($flagMap)) || $generateThumbnails;
 
 
 // Re-index the arguments array after removing flags.
@@ -539,93 +535,23 @@ function getExecutableInfo(string $filePath, string $exiftoolPath): array
 }
 
 /**
- * Generates a nested path for a thumbnail based on the file ID.
+ * Queues a file for thumbnail generation.
  *
- * @param int $fileId The unique ID of the file.
- * @return string The relative path for the thumbnail, e.g., "thumbnails/00/00/12/000012345.jpg".
- */
-function getThumbnailPath(int $fileId): string
-{
-    // Pad the ID to 9 digits with leading zeros
-    $paddedId = str_pad($fileId, 9, '0', STR_PAD_LEFT);
-
-    // Create the path parts
-    $part1 = substr($paddedId, 0, 2);
-    $part2 = substr($paddedId, 2, 2);
-    $part3 = substr($paddedId, 4, 2);
-
-    $directoryPath = "thumbnails/{$part1}/{$part2}/{$part3}";
-
-    // The full path to the directory on the filesystem
-    $fullDirectoryPath = __DIR__ . '/' . $directoryPath;
-
-    // Ensure the directory exists before saving the file
-    if (!is_dir($fullDirectoryPath)) {
-        // The 'true' parameter creates nested directories recursively
-        if (!mkdir($fullDirectoryPath, 0755, true)) {
-            // Handle the error case where directory creation fails
-            log_error("Failed to create thumbnail directory: {$fullDirectoryPath}");
-            return ''; // Return empty string on failure
-        }
-    }
-
-    return "{$directoryPath}/{$paddedId}.jpg";
-}
-
-/**
- * Creates a thumbnail for an image file.
- * @param string $sourcePath The full path to the source image.
- * @param string $destinationPath The full path to save the thumbnail.
- * @param int $maxWidth The maximum width of the thumbnail.
+ * @param PDO $pdo The database connection object.
+ * @param int $fileId The ID of the file to queue.
  * @return bool True on success, false on failure.
  */
-function createThumbnail(string $sourcePath, string $destinationPath, int $maxWidth = 400): bool
+function queueThumbnail(PDO $pdo, int $fileId): bool
 {
-    if (!extension_loaded('gd')) return false;
-
-    // Ensure the destination directory exists
-    $dir = dirname($destinationPath);
-    if (!is_dir($dir)) {
-        if (!mkdir($dir, 0755, true)) {
-            log_error("Failed to create directory for thumbnail: {$dir}");
-            return false;
-        }
+    try {
+        $stmt = $pdo->prepare(
+            "INSERT INTO st_thumbnail_queue (file_id, status) VALUES (?, 'pending')"
+        );
+        return $stmt->execute([$fileId]);
+    } catch (PDOException $e) {
+        log_error("Failed to queue thumbnail for file_id {$fileId}: " . $e->getMessage());
+        return false;
     }
-
-    list($width, $height, $type) = @getimagesize($sourcePath);
-    if (!$width || !$height) return false;
-
-    $newWidth = min($width, $maxWidth);
-    $newHeight = floor($height * ($newWidth / $width));
-
-    $thumb = imagecreatetruecolor($newWidth, $newHeight);
-    if ($thumb === false) return false;
-
-    $source = null;
-    switch ($type) {
-        case IMAGETYPE_JPEG:
-            $source = @imagecreatefromjpeg($sourcePath);
-            break;
-        case IMAGETYPE_PNG:
-            $source = @imagecreatefrompng($sourcePath);
-            break;
-        case IMAGETYPE_GIF:
-            $source = @imagecreatefromgif($sourcePath);
-            break;
-        default:
-            return false; // Unsupported image type
-    }
-
-    if ($source === false) return false;
-
-    imagecopyresampled($thumb, $source, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
-
-    $success = imagejpeg($thumb, $destinationPath, 85); // Save as JPEG with 85% quality
-
-    imagedestroy($thumb);
-    imagedestroy($source);
-
-    return $success;
 }
 
 // --- File Type Categorization ---
@@ -664,11 +590,11 @@ function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats):
 
         // Update the scan record with the latest stats
         $updateStmt = $pdo->prepare(
-            "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?, thumbnails_created = ?,\n                thumbnail_creations_failed = ?\n            WHERE scan_id = ?"
+            "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?, thumbnails_queued = ?,\n                thumbnail_queueing_failed = ?\n            WHERE scan_id = ?"
         );
         $updateStmt->execute([
             $lastPath, $stats['scanned'], $stats['added'], $stats['updated'],
-            $stats['deleted'], $stats['thumbnails_created'], $stats['thumbnails_failed'], $scanId
+            $stats['deleted'], $stats['thumbnails_queued'], $stats['thumbnails_failed_to_queue'], $scanId
         ]);
 
         $filesInTransaction = 0;
@@ -677,8 +603,10 @@ function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats):
 }
 
 // A function to handle I/O errors and attempt to remount the drive.
-function attempt_remount(string $mountPoint, string $physicalSerial): bool {
+function attempt_remount(string $mountPoint, string $physicalSerial, string $devicePath): bool {
     echo "!! Filesystem error detected. Attempting to remount!\n";
+    $targetDeviceName = basename($devicePath);
+
     for ($i = 1; $i <= 5; $i++) {
         echo "  > Attempt {$i} of 5!\n";
 
@@ -694,29 +622,31 @@ function attempt_remount(string $mountPoint, string $physicalSerial): bool {
         if ($devices && isset($devices['blockdevices'])) {
             foreach ($devices['blockdevices'] as $device) {
                 if (isset($device['serial']) && $device['serial'] === $physicalSerial) {
-                    // This is the parent device, we need to find the partition
+                    // This is the parent device, we need to find the correct partition.
                     if (!empty($device['children'])) {
-                        // Assuming we need to mount a partition of this device.
-                        // This logic might need adjustment if mounting the whole device (e.g. /dev/sdb not /dev/sdb1)
-                        // We are looking for the partition that is supposed to be on $mountPoint.
-                        // We can't know for sure which partition is the right one without more info.
-                        // A simple approach is to try to mount each partition.
                         foreach($device['children'] as $child) {
-                             $deviceToMount = '/dev/' . $child['name'];
-                             echo "  > Found device {$deviceToMount} for serial {$physicalSerial}.\n";
-                             break; // Taking the first partition.
+                            if ($child['name'] === $targetDeviceName) {
+                                $deviceToMount = '/dev/' . $child['name'];
+                                echo "  > Found matching partition {$deviceToMount} for serial {$physicalSerial}.\n";
+                                break 2; // Break out of both foreach loops
+                            }
                         }
+                        // If we are here, the specific partition was not found, which is an error.
+                        echo "  > Error: Device with serial {$physicalSerial} was found, but partition {$targetDeviceName} was not found.\n";
                     } else {
-                        $deviceToMount = '/dev/' . $device['name'];
-                        echo "  > Found device {$deviceToMount} for serial {$physicalSerial}.\n";
+                        // This case handles drives without partitions (e.g. /dev/sdb)
+                        if ($device['name'] === $targetDeviceName) {
+                            $deviceToMount = '/dev/' . $device['name'];
+                            echo "  > Found device {$deviceToMount} for serial {$physicalSerial}.\n";
+                            break; // Break from the parent device loop
+                        }
                     }
-                    break;
                 }
             }
         }
 
         if (empty($deviceToMount)) {
-            echo "  > Could not find device with serial {$physicalSerial}. Retrying in 5 seconds!\n";
+            echo "  > Could not find device with serial {$physicalSerial} and partition {$targetDeviceName}. Retrying in 5 seconds!\n";
             sleep(5);
             continue;
         }
@@ -877,7 +807,7 @@ try {
             } catch (Exception $e) {
                 if (strpos($e->getMessage(), 'stat failed') !== false) {
                     echo "Warning: Caught I/O Error: " . $e->getMessage() . "\n";
-                    if (attempt_remount($mountPoint, $physicalSerial)) {
+                    if (attempt_remount($mountPoint, $physicalSerial, $devicePath)) {
                         echo "  > Retrying file operation...\n";
                         continue; // Retry the operation on the same file
                     } else {
@@ -899,7 +829,7 @@ try {
         $upsertStmt->execute($fileData);
         $rowCount = $upsertStmt->rowCount();
 
-        // --- Thumbnail Generation ---
+        // --- Thumbnail Queueing ---
         if ($generateThumbnails && !$fileInfo->isDir() && $category === 'Image') {
             $fileId = $pdo->lastInsertId();
             // If the row was updated, lastInsertId will be 0. We need to get the ID.
@@ -910,17 +840,10 @@ try {
             }
 
             if ($fileId) {
-                $thumbnailRelPath = getThumbnailPath($fileId);
-                if (!empty($thumbnailRelPath)) {
-                    $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
-                    if (createThumbnail($path, $thumbDestination)) {
-                        $thumbUpdateStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
-                        $thumbUpdateStmt->execute([$thumbnailRelPath, $fileId]);
-                        $stats['thumbnails_created']++;
-                        $stats['thumbnails_size'] += filesize($thumbDestination);
-                    } else {
-                        $stats['thumbnails_failed']++;
-                    }
+                if (queueThumbnail($pdo, $fileId)) {
+                    $stats['thumbnails_queued']++;
+                } else {
+                    $stats['thumbnails_failed_to_queue']++;
                 }
             }
         }
@@ -985,9 +908,8 @@ echo "New Files Added:      " . number_format($finalStats['new_files_added']) . 
 echo "Existing Files Updated: " . number_format($finalStats['existing_files_updated']) . "\n";
 echo "Files Marked Deleted: " . number_format($finalStats['files_marked_deleted']) . "\n";
 if ($generateThumbnails) {
-    echo "Thumbnails Created:   " . number_format($finalStats['thumbnails_created']) . "\n";
-    echo "Thumbnails Failed:    " . number_format($finalStats['thumbnail_creations_failed']) . "\n";
-    // Note: Thumbnails size is not tracked incrementally in this version.
+    echo "Thumbnails Queued:   " . number_format($finalStats['thumbnails_queued']) . "\n";
+    echo "Thumbnails Failed to Queue:    " . number_format($finalStats['thumbnail_queueing_failed']) . "\n";
 }
 echo "Scan Duration:        {$durationFormatted}\n";
 echo "---------------------\n";

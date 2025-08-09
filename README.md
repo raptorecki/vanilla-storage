@@ -8,13 +8,32 @@ A simple PHP and MySQL-based application for tracking storage drives and their c
 *   Scan drives to index their files.
 *   Search for drives and files.
 *   View statistics about your storage.
+*   Asynchronous thumbnail generation for image files.
 
 ## Setup
 
 1.  Create a MySQL database.
 2.  If a schema file is provided (e.g., `storage_schema.sql`), import it to create the necessary tables.
-3.  Copy `config.php.example` to `config.php` and update it with your database credentials.
-4.  Use the `scan_drive.php` script to index your drives. See the **Scanning Drives** section below for detailed instructions.
+3.  **Database Schema Update:** After initial setup, you need to update your database schema to support asynchronous thumbnail generation. Execute the following SQL command on your MySQL database:
+    ```sql
+    ALTER TABLE st_scans
+    ADD COLUMN thumbnails_queued INT DEFAULT 0,
+    ADD COLUMN thumbnail_queueing_failed INT DEFAULT 0;
+
+    CREATE TABLE IF NOT EXISTS st_thumbnail_queue (
+        queue_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        file_id BIGINT UNSIGNED NOT NULL,
+        status ENUM('pending', 'processing', 'completed', 'failed') NOT NULL DEFAULT 'pending',
+        added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        processed_date TIMESTAMP NULL,
+        error_message TEXT,
+        INDEX (file_id),
+        INDEX (status)
+    );
+    ```
+    Remember to replace `your_username` and `your_database_name` with your actual MySQL credentials if running from the command line.
+4.  Copy `config.php.example` to `config.php` and update it with your database credentials.
+5.  Use the `scan_drive.php` script to index your drives. See the **Scanning Drives** section below for detailed instructions.
 
 ## Scanning Drives
 
@@ -38,7 +57,7 @@ The script accepts several optional flags to control its behavior:
 
 *   `--no-md5`: Skips the calculation of MD5 hashes for each file. This significantly speeds up the scanning process.
 *   `--no-drive-info-update`: Prevents the script from automatically updating the drive's model, serial number, and filesystem type in the database.
-*   `--no-thumbnails`: Skips the generation of thumbnails for image files.
+*   `--no-thumbnails`: **(Updated)** This flag now prevents `scan_drive.php` from queuing thumbnail generation requests for image files. Thumbnail generation is now handled asynchronously by a separate script.
 *   `--resume`: If a previous scan was interrupted, this flag allows you to resume the scan from the last successfully processed file, preventing you from having to start over.
 *   `--skip-existing`: This flag tells the script to ignore any file that already exists in the database for that drive. This is very useful for quickly adding new files to a drive that has already been scanned.
 
@@ -54,7 +73,7 @@ If the script encounters a filesystem I/O error during a scan (e.g., the drive d
 sudo php scan_drive.php 5 1 /mnt/my_external_drive
 ```
 
-**Fast Scan (No MD5 Hashes or Thumbnails):**
+**Fast Scan (No MD5 Hashes or Thumbnail Queuing):**
 
 ```bash
 sudo php scan_drive.php --no-md5 --no-thumbnails 5 1 /mnt/my_external_drive
@@ -71,3 +90,27 @@ sudo php scan_drive.php --resume 5 1 /mnt/my_external_drive
 ```bash
 sudo php scan_drive.php --skip-existing 5 1 /mnt/my_external_drive
 ```
+
+## Thumbnail Generation
+
+Thumbnail generation is now handled asynchronously by a dedicated CLI script, `generate_thumbnails.php`. This allows `scan_drive.php` to complete faster by offloading the resource-intensive thumbnail creation process.
+
+### Running the Thumbnail Generator
+
+To start the thumbnail generation process, run the following command in your terminal. It's recommended to run this script in the background, especially for large queues.
+
+```bash
+php generate_thumbnails.php &
+```
+
+This script will continuously check the `st_thumbnail_queue` table for pending jobs, generate thumbnails, and update their status.
+
+### Checking Thumbnail Status for a Drive
+
+You can check the progress of thumbnail generation for a specific drive using the `check_thumbnails.php` script:
+
+```bash
+php check_thumbnails.php <drive_id>
+```
+
+Replace `<drive_id>` with the ID of the drive you are interested in. The script will report the number of pending, processing, completed, and failed thumbnail jobs for that drive. Once all jobs are either `completed` or `failed`, you can safely disconnect the drive (assuming no other operations are pending).
