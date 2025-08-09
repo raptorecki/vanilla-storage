@@ -42,50 +42,77 @@ require_once 'helpers.php';
 
 
 // --- Argument Parsing ---
-// Retrieve command-line arguments passed to the script.
 $args = $argv;
-array_shift($args); // Remove the script name itself from the arguments array.
+array_shift($args); // Remove the script name itself.
 
-// Initialize flags based on default behavior.
-$calculateMd5 = true; // By default, MD5 hashes will be calculated.
-$updateDriveInfo = true; // By default, drive information will be updated.
-$generateThumbnails = true; // By default, thumbnails will be generated.
+// --- Configuration ---
+$commitInterval = 100; // Commit progress to the database every 100 files.
 
-// Check for the '--no-md5' flag.
-if (($key = array_search('--no-md5', $args)) !== false) {
-    $calculateMd5 = false;
-    unset($args[$key]);
+// Initialize flags with default values.
+$calculateMd5 = true;
+$updateDriveInfo = true;
+$generateThumbnails = true;
+$resumeScan = false;
+$skipExisting = false;
+
+// Create a mapping for flags to their variables.
+$flagMap = [
+    '--no-md5' => &$calculateMd5,
+    '--no-drive-info-update' => &$updateDriveInfo,
+    '--no-thumbnails' => &$generateThumbnails,
+    '--resume' => &$resumeScan,
+    '--skip-existing' => &$skipExisting,
+];
+
+// Process flags.
+foreach ($flagMap as $flag => &$variable) {
+    if (($key = array_search($flag, $args)) !== false) {
+        $variable = ($flag === '--resume' || $flag === '--skip-existing'); // Set boolean flags
+        if ($variable === false) { // For --no-* flags
+            $variable = false;
+        }
+        unset($args[$key]);
+    }
 }
+// For the --no-* flags, the logic is inverted.
+$calculateMd5 = !in_array('--no-md5', array_keys($flagMap)) || $calculateMd5;
+$updateDriveInfo = !in_array('--no-drive-info-update', array_keys($flagMap)) || $updateDriveInfo;
+$generateThumbnails = !in_array('--no-thumbnails', array_keys($flagMap)) || $generateThumbnails;
 
-// Check for the '--no-drive-info-update' flag.
-if (($key = array_search('--no-drive-info-update', $args)) !== false) {
-    $updateDriveInfo = false;
-    unset($args[$key]);
-}
 
-// Check for the '--no-thumbnails' flag.
-if (($key = array_search('--no-thumbnails', $args)) !== false) {
-    $generateThumbnails = false;
-    unset($args[$key]);
-}
-
-// Re-index the arguments array after removing optional flags.
+// Re-index the arguments array after removing flags.
 $args = array_values($args);
 
-// Validate the number of remaining required arguments.
-// Expects drive_id, partition_number, and mount_point.
+// --- Usage and Validation ---
+$usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_number> <mount_point>\n" .
+    "Options:\n" .
+    "  --no-md5                Skip MD5 hash calculation for a faster scan.\n" .
+    "  --no-drive-info-update  Skip updating drive model, serial, and filesystem type.\n" .
+    "  --no-thumbnails         Skip generating thumbnails for image files.\n" .
+    "  --resume                Resume an interrupted scan for the specified drive.\n" .
+    "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
+    "  --help                  Display this help message.\n";
+
+// Check for --help flag first
+if (in_array('--help', $argv)) {
+    echo $usage;
+    exit(0);
+}
+
 if (count($args) < 3) {
-    echo "Usage: php " . basename(__FILE__) . " [--no-md5] [--no-drive-info-update] [--no-thumbnails] <drive_id> <partition_number> <mount_point>\n";
-    echo "  --no-md5 : Optional. Skips MD5 hash calculation for a faster scan.\n";
-    echo "  --no-drive-info-update : Optional. Skips updating drive model, serial, and filesystem type.\n";
-    echo "  --no-thumbnails : Optional. Skips generating thumbnails for image files.\n";
+    echo $usage;
+    exit(1);
+}
+
+if ($resumeScan && $skipExisting) {
+    echo "Error: The --resume and --skip-existing flags cannot be used together.\n";
     exit(1);
 }
 
 // Assign parsed arguments to variables.
-$driveId = (int)$args[0]; // Cast drive_id to an integer.
-$partitionNumber = (int)$args[1]; // Cast partition_number to an integer.
-$mountPoint = $args[2]; // The mount point path.
+$driveId = (int)$args[0];
+$partitionNumber = (int)$args[1];
+$mountPoint = $args[2];
 
 // Validate drive ID and mount point.
 if ($driveId <= 0) {
@@ -95,6 +122,80 @@ if ($driveId <= 0) {
 if (!is_dir($mountPoint)) {
     echo "Error: Mount point '{$mountPoint}' is not a valid directory.\n";
     exit(1);
+}
+
+// --- Scan Initialization ---
+$scanId = null;
+$lastScannedPath = null;
+$stats = [
+    'scanned' => 0, 'added' => 0, 'updated' => 0, 'deleted' => 0,
+    'thumbnails_created' => 0, 'thumbnails_failed' => 0, 'thumbnails_size' => 0,
+];
+
+if ($resumeScan) {
+    echo "Attempting to resume scan for drive ID {$driveId}...\n";
+    $stmt = $pdo->prepare("SELECT * FROM st_scans WHERE drive_id = ? AND status = 'interrupted' ORDER BY scan_date DESC LIMIT 1");
+    $stmt->execute([$driveId]);
+    $lastScan = $stmt->fetch();
+
+    if ($lastScan) {
+        $scanId = $lastScan['scan_id'];
+        $lastScannedPath = $lastScan['last_scanned_path'];
+        // Load stats from the last scan to continue counting
+        $stats['scanned'] = $lastScan['total_items_scanned'];
+        $stats['added'] = $lastScan['new_files_added'];
+        $stats['updated'] = $lastScan['existing_files_updated'];
+        $stats['deleted'] = $lastScan['files_marked_deleted'];
+        $stats['thumbnails_created'] = $lastScan['thumbnails_created'];
+        $stats['thumbnails_failed'] = $lastScan['thumbnail_creations_failed'];
+
+        echo "  > Resuming scan_id: {$scanId}\n";
+        echo "  > Starting from path: " . ($lastScannedPath ?: 'beginning') . "\n";
+        
+        $updateStatusStmt = $pdo->prepare("UPDATE st_scans SET status = 'running' WHERE scan_id = ?");
+        $updateStatusStmt->execute([$scanId]);
+    } else {
+        echo "  > No interrupted scan found for drive ID {$driveId}. Starting a new scan.\n";
+        $resumeScan = false; // Switch back to normal mode
+    }
+}
+
+if (!$resumeScan) {
+    // Create a new scan record
+    $insertScanStmt = $pdo->prepare(
+        "INSERT INTO st_scans (drive_id, scan_date, status) VALUES (?, NOW(), 'running')"
+    );
+    $insertScanStmt->execute([$driveId]);
+    $scanId = $pdo->lastInsertId();
+    echo "Starting new scan (scan_id: {$scanId}) for drive_id: {$driveId} at '{$mountPoint}'...\n";
+}
+
+// --- Interruption Handling ---
+// Global variable to hold the scan ID for the shutdown function
+$GLOBALS['scanId'] = $scanId;
+$GLOBALS['pdo'] = $pdo;
+
+register_shutdown_function('handle_shutdown');
+if (function_exists('pcntl_async_signals')) {
+    pcntl_async_signals(true);
+    pcntl_signal(SIGINT, 'handle_shutdown'); // Ctrl+C
+    pcntl_signal(SIGTERM, 'handle_shutdown'); // Kill
+}
+
+function handle_shutdown() {
+    global $pdo, $scanId;
+    // This function will be called on script exit
+    $error = error_get_last();
+    // We only mark as interrupted if it's a fatal error or signal
+    if ($scanId && ($error !== null || php_sapi_name() === 'cli')) {
+        try {
+            $stmt = $pdo->prepare("UPDATE st_scans SET status = 'interrupted' WHERE scan_id = ? AND status = 'running'");
+            $stmt->execute([$scanId]);
+            echo "\nScan interrupted. Run with --resume to continue.\n";
+        } catch (PDOException $e) {
+            // Cannot connect to DB, nothing to do.
+        }
+    }
 }
 
 // --- Drive Serial Number and Info Verification ---
@@ -550,58 +651,120 @@ $extensionMap = [
 
 // --- Main Scanning Logic ---
 
-// Initialize statistics counters for the scan process.
-$stats = [
-    'scanned' => 0, // Total items (files/directories) scanned.
-    'added' => 0,   // New files added to the database.
-    'updated' => 0, // Existing files updated in the database.
-    'deleted' => 0, // Files marked as deleted (not found during current scan).
-    'thumbnails_created' => 0,
-    'thumbnails_failed' => 0,
-    'thumbnails_size' => 0,
-];
+// A function to commit the current batch of file updates and record progress.
+function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats): void {
+    global $commitInterval;
+    static $filesInTransaction = 0;
+
+    $filesInTransaction++;
+
+    if ($filesInTransaction >= $commitInterval) {
+        echo "  > Committing progress... ({$stats['scanned']} items scanned)\n";
+        $pdo->commit(); // Commit the current transaction
+
+        // Update the scan record with the latest stats
+        $updateStmt = $pdo->prepare(
+            "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?, thumbnails_created = ?,\n                thumbnail_creations_failed = ?\n            WHERE scan_id = ?"
+        );
+        $updateStmt->execute([
+            $lastPath, $stats['scanned'], $stats['added'], $stats['updated'],
+            $stats['deleted'], $stats['thumbnails_created'], $stats['thumbnails_failed'], $scanId
+        ]);
+
+        $filesInTransaction = 0;
+        $pdo->beginTransaction(); // Start a new transaction for the next batch
+    }
+}
+
+// A function to handle I/O errors and attempt to remount the drive.
+function attempt_remount(string $mountPoint, string $physicalSerial): bool {
+    echo "!! Filesystem error detected. Attempting to remount!\n";
+    for ($i = 1; $i <= 5; $i++) {
+        echo "  > Attempt {$i} of 5!\n";
+
+        // Unmount first, suppress errors if it's already unmounted
+        @shell_exec("umount " . escapeshellarg($mountPoint));
+        sleep(2);
+
+        // Find the device by serial number
+        $lsblk_json = shell_exec('lsblk -o NAME,SERIAL -J');
+        $devices = json_decode($lsblk_json, true);
+        $deviceToMount = '';
+
+        if ($devices && isset($devices['blockdevices'])) {
+            foreach ($devices['blockdevices'] as $device) {
+                if (isset($device['serial']) && $device['serial'] === $physicalSerial) {
+                    // This is the parent device, we need to find the partition
+                    if (!empty($device['children'])) {
+                        // Assuming we need to mount a partition of this device.
+                        // This logic might need adjustment if mounting the whole device (e.g. /dev/sdb not /dev/sdb1)
+                        // We are looking for the partition that is supposed to be on $mountPoint.
+                        // We can't know for sure which partition is the right one without more info.
+                        // A simple approach is to try to mount each partition.
+                        foreach($device['children'] as $child) {
+                             $deviceToMount = '/dev/' . $child['name'];
+                             echo "  > Found device {$deviceToMount} for serial {$physicalSerial}.\n";
+                             break; // Taking the first partition.
+                        }
+                    } else {
+                        $deviceToMount = '/dev/' . $device['name'];
+                        echo "  > Found device {$deviceToMount} for serial {$physicalSerial}.\n";
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (empty($deviceToMount)) {
+            echo "  > Could not find device with serial {$physicalSerial}. Retrying in 5 seconds!\n";
+            sleep(5);
+            continue;
+        }
+
+        // Attempt to mount
+        echo "  > Mounting {$deviceToMount} to {$mountPoint}!\n";
+        shell_exec("mount " . escapeshellarg($deviceToMount) . " " . escapeshellarg($mountPoint));
+        sleep(2);
+
+        // Check if mount was successful
+        $df_output = shell_exec("df " . escapeshellarg($mountPoint));
+        if (strpos($df_output, $deviceToMount) !== false) {
+            echo "  > Remount successful.\n";
+            return true;
+        } else {
+            echo "  > Failed to remount. Retrying in 5 seconds!\n";
+            sleep(5);
+        }
+    }
+    return false;
+}
+
 
 try {
-    // Start a database transaction for atomicity. All changes will be committed together or rolled back on error.
+    // This is the main transaction for a batch of files.
     $pdo->beginTransaction();
 
-    // Insert a new scan record
-    $insertScanStmt = $pdo->prepare(
-        "INSERT INTO st_scans (drive_id, scan_date, total_items_scanned, new_files_added, existing_files_updated, files_marked_deleted, scan_duration, thumbnails_created, thumbnail_creations_failed)\n         VALUES (?, NOW(), 0, 0, 0, 0, 0, 0, 0)"
-    );
-    $insertScanStmt->execute([$driveId]);
-    $scanId = $pdo->lastInsertId();
-
-    // 1. Mark all existing, non-deleted files for this drive as "deleted".
-    // This is a soft delete. If a file is found during the current scan, its `date_deleted` will be set back to NULL.
-    echo "Step 1: Marking existing files for deletion check...\n";
+    // Step 1: Mark existing files for deletion check (only for new, non-skip scans)
     $scanStartTimeForDeletion = date('Y-m-d H:i:s');
-    $stmt = $pdo->prepare("UPDATE st_files SET date_deleted = ? WHERE drive_id = ? AND date_deleted IS NULL");
-    $stmt->execute([$scanStartTimeForDeletion, $driveId]);
+    if (!$resumeScan && !$skipExisting) {
+        echo "Step 1: Marking existing files for deletion check...\n";
+        $stmt = $pdo->prepare("UPDATE st_files SET date_deleted = ? WHERE drive_id = ? AND date_deleted IS NULL");
+        $stmt->execute([$scanStartTimeForDeletion, $driveId]);
+    } else {
+        echo "Step 1: Skipped marking files for deletion due to --resume or --skip-existing flag.\n";
+    }
 
-    // 2. Prepare the main SQL statement for inserting or updating file records.
-    // This uses MySQL's `ON DUPLICATE KEY UPDATE` syntax for efficient upsert operations.
+    // Step 2: Prepare the main SQL statement for inserting or updating file records.
     $update_clauses = [
-        "date_deleted = NULL", // Un-delete the file if it's found again.
-        "last_scan_id = VALUES(last_scan_id)", // Update last_scan_id
-        "ctime = VALUES(ctime)",
-        "mtime = VALUES(mtime)",
-        "size = VALUES(size)",
-        "media_format = VALUES(media_format)",
-        "media_codec = VALUES(media_codec)",
-        "media_resolution = VALUES(media_resolution)",
-        "media_duration = VALUES(media_duration)",
-        "exif_date_taken = VALUES(exif_date_taken)",
-        "exif_camera_model = VALUES(exif_camera_model)",
-        "file_category = VALUES(file_category)",
-        "is_directory = VALUES(is_directory)",
-        "partition_number = VALUES(partition_number)", // Update partition number.
-        "product_name = VALUES(product_name)",
-        "product_version = VALUES(product_version)",
-        "exiftool_json = VALUES(exiftool_json)",
-        "thumbnail_path = VALUES(thumbnail_path)"
+        "date_deleted = NULL", "last_scan_id = VALUES(last_scan_id)", "ctime = VALUES(ctime)",
+        "mtime = VALUES(mtime)", "size = VALUES(size)", "media_format = VALUES(media_format)",
+        "media_codec = VALUES(media_codec)", "media_resolution = VALUES(media_resolution)",
+        "media_duration = VALUES(media_duration)", "exif_date_taken = VALUES(exif_date_taken)",
+        "exif_camera_model = VALUES(exif_camera_model)", "file_category = VALUES(file_category)",
+        "is_directory = VALUES(is_directory)", "partition_number = VALUES(partition_number)",
+        "product_name = VALUES(product_name)", "product_version = VALUES(product_version)",
+        "exiftool_json = VALUES(exiftool_json)", "thumbnail_path = VALUES(thumbnail_path)"
     ];
-
     $insert_cols_array = [
         "drive_id", "path", "path_hash", "filename", "size", "ctime", "mtime",
         "file_category", "media_format", "media_codec", "media_resolution",
@@ -616,12 +779,11 @@ try {
     ];
 
     if ($calculateMd5) {
-        array_splice($insert_cols_array, 5, 0, "md5_hash"); // Insert md5_hash at index 5
-        array_splice($insert_vals_array, 5, 0, ":md5_hash"); // Insert :md5_hash at index 5
+        array_splice($insert_cols_array, 5, 0, "md5_hash");
+        array_splice($insert_vals_array, 5, 0, ":md5_hash");
         $update_clauses[] = "md5_hash = VALUES(md5_hash)";
     }
 
-    // Construct the final SQL query.
     $sql = sprintf(
         "INSERT INTO st_files (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
         implode(", ", $insert_cols_array),
@@ -630,113 +792,112 @@ try {
     );
     $upsertStmt = $pdo->prepare($sql);
 
-    // 3. Recursively scan the directory structure of the mount point.
-    $scan_message = $calculateMd5 ? "Scanning filesystem and updating database (MD5 hashing may be slow)..." : "Scanning filesystem and updating database (skipping MD5 hashing)...";
+    // Step 3: Recursively scan the directory structure.
+    $scan_message = $calculateMd5 ? "Scanning filesystem (MD5 hashing may be slow)..." : "Scanning filesystem (skipping MD5 hashing)...";
     echo "Step 2: {$scan_message}\n\n";
 
-    // Create a RecursiveDirectoryIterator to traverse the filesystem.
-    // SKIP_DOTS ignores '.' and '..' entries.
-    // UNIX_PATHS ensures consistent path separators.
     $iterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($mountPoint, FilesystemIterator::SKIP_DOTS | FilesystemIterator::UNIX_PATHS),
-        RecursiveIteratorIterator::SELF_FIRST // Process directories before their contents.
+        RecursiveIteratorIterator::SELF_FIRST
     );
 
-    // Get terminal width for clean progress display. Fallback to 80 characters if not detectable.
-    $termWidth = (int) @shell_exec('tput cols');
-    if ($termWidth <= 0) {
-        $termWidth = 80;
-    }
+    $termWidth = (int) @shell_exec('tput cols') ?: 80;
+    $foundResumePath = ($lastScannedPath === null);
 
-    // Iterate over each file and directory found during the scan.
     foreach ($iterator as $fileInfo) {
-        $stats['scanned']++; // Increment scanned item count.
-        $path = $fileInfo->getPathname(); // Full path of the current item.
-        // Calculate the relative path from the mount point.
+        $path = $fileInfo->getPathname();
         $relativePath = substr($path, strlen($mountPoint));
 
-        // --- Verbose Progress Indicator ---
-        // Format a progress message including the scanned count and relative path.
-        $progressMessage = sprintf("[%' 9d] %s", $stats['scanned'], $relativePath);
-        // Truncate the message if it exceeds terminal width to prevent line wrapping.
-        if (mb_strlen($progressMessage) > $termWidth) {
-            $progressMessage = mb_substr($progressMessage, 0, $termWidth - 4) . '...';
+        if (!$foundResumePath) {
+            if ($relativePath === $lastScannedPath) {
+                $foundResumePath = true;
+                echo "  > Resumed scan, found last path. Continuing...\n";
+            }
+            continue; // Skip until we find the last scanned path
         }
-        // Output the progress message, each on a new line.
-        echo $progressMessage . "\n";
 
-        // --- Metadata Extraction ---
-        $extension = strtolower($fileInfo->getExtension()); // Get file extension.
-        $category = $extensionMap[$extension] ?? 'Other'; // Categorize file based on extension map.
-        // Initialize metadata array with default null values.
-        $metadata = ['format' => null, 'codec' => null, 'resolution' => null, 'duration' => null, 'exif_date_taken' => null, 'exif_camera_model' => null, 'product_name' => null, 'product_version' => null];
-        $exiftoolJson = null;
-        $thumbnailPath = null;
+        $stats['scanned']++;
 
-        // Extract media metadata for video and audio files if ffprobe is available.
-        if (!$fileInfo->isDir() && !empty($ffprobePath)) {
-            switch ($category) {
-                case 'Video':
-                    $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
-                    break;
-                case 'Audio':
-                    $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
-                    break;
+        // --- Skip Existing File Logic ---
+        if ($skipExisting) {
+            $checkStmt = $pdo->prepare("SELECT 1 FROM st_files WHERE drive_id = ? AND path_hash = ?");
+            $checkStmt->execute([$driveId, hash('sha256', $relativePath)]);
+            if ($checkStmt->fetch()) {
+                // Optional: Add a message to show it's being skipped
+                // echo "Skipping existing file: $relativePath\n";
+                continue;
             }
         }
-        // Extract image metadata using native PHP functions (does not depend on ffprobe).
-        if (!$fileInfo->isDir() && $category === 'Image') {
-            $metadata = array_merge($metadata, getImageInfo($path) ?? []);
-        }
 
-        // Extract executable metadata if exiftool is available.
-        if (!$fileInfo->isDir() && !empty($exiftoolPath) && $category === 'Executable') {
-            $metadata = array_merge($metadata, getExecutableInfo($path, $exiftoolPath));
-        }
+        $fileData = null;
+        $maxRetries = 5;
+        for ($retry = 0; $retry < $maxRetries; $retry++) {
+            try {
+                // --- Verbose Progress Indicator ---
+                $progressMessage = sprintf("[%' 9d] %s", $stats['scanned'], $relativePath);
+                if (mb_strlen($progressMessage) > $termWidth) {
+                    $progressMessage = mb_substr($progressMessage, 0, $termWidth - 4) . '...';
+                }
+                echo $progressMessage . "\n";
 
-        // Extract full exiftool data for all files if exiftool is available.
-        if (!$fileInfo->isDir() && !empty($exiftoolPath)) {
-            $exiftoolJson = getExiftoolJson($path, $exiftoolPath);
-        }
+                // --- Metadata Extraction ---
+                $extension = strtolower($fileInfo->getExtension());
+                $category = $extensionMap[$extension] ?? 'Other';
+                $metadata = ['format' => null, 'codec' => null, 'resolution' => null, 'duration' => null, 'exif_date_taken' => null, 'exif_camera_model' => null, 'product_name' => null, 'product_version' => null];
+                $exiftoolJson = null;
 
-        // Prepare parameters for the database upsert operation.
-        $params = [
-            'drive_id' => $driveId,
-            'path' => $relativePath,
-            'path_hash' => hash('sha256', $relativePath), // SHA256 hash of the relative path for quick lookups.
-            'filename' => $fileInfo->getFilename(),
-            'size' => $fileInfo->isDir() ? 0 : $fileInfo->getSize(), // Size is 0 for directories.
-            'ctime' => date('Y-m-d H:i:s', $fileInfo->getCTime()), // Creation time.
-            'mtime' => date('Y-m-d H:i:s', $fileInfo->getMTime()), // Modification time.
-            'media_format' => $metadata['format'],
-            'media_codec' => $metadata['codec'],
-            'media_resolution' => $metadata['resolution'],
-            'media_duration' => $metadata['duration'],
-            'exif_date_taken' => $metadata['exif_date_taken'],
-            'exif_camera_model' => $metadata['exif_camera_model'],
-            'file_category' => $fileInfo->isDir() ? 'Directory' : $category, // Set category to 'Directory' for directories.
-            'is_directory' => $fileInfo->isDir() ? 1 : 0, // Boolean flag for directory.
-            'partition_number' => $partitionNumber, // The partition number for the file.
-            'product_name' => $metadata['product_name'],
-            'product_version' => $metadata['product_version'],
-            'exiftool_json' => $exiftoolJson,
-            'thumbnail_path' => $thumbnailPath,
-            'last_scan_id' => $scanId,
-        ];
+                if (!$fileInfo->isDir()) {
+                    if (!empty($ffprobePath)) {
+                        if ($category === 'Video') $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
+                        if ($category === 'Audio') $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
+                    }
+                    if ($category === 'Image') $metadata = array_merge($metadata, getImageInfo($path) ?? []);
+                    if (!empty($exiftoolPath) && $category === 'Executable') $metadata = array_merge($metadata, getExecutableInfo($path, $exiftoolPath));
+                    if (!empty($exiftoolPath)) $exiftoolJson = getExiftoolJson($path, $exiftoolPath);
+                }
 
-        // Calculate MD5 hash if enabled and the current item is a file (not a directory).
-        if ($calculateMd5) {
-            $md5_hash = null;
-            if (!$fileInfo->isDir()) {
-                // Use hash_file() for memory-efficient hashing of large files.
-                $md5_hash = hash_file('md5', $path);
+                $fileData = [
+                    'drive_id' => $driveId, 'path' => $relativePath, 'path_hash' => hash('sha256', $relativePath),
+                    'filename' => $fileInfo->getFilename(), 'size' => $fileInfo->isDir() ? 0 : $fileInfo->getSize(),
+                    'ctime' => date('Y-m-d H:i:s', $fileInfo->getCTime()), 'mtime' => date('Y-m-d H:i:s', $fileInfo->getMTime()),
+                    'media_format' => $metadata['format'], 'media_codec' => $metadata['codec'], 'media_resolution' => $metadata['resolution'],
+                    'media_duration' => $metadata['duration'], 'exif_date_taken' => $metadata['exif_date_taken'],
+                    'exif_camera_model' => $metadata['exif_camera_model'], 'file_category' => $fileInfo->isDir() ? 'Directory' : $category,
+                    'is_directory' => $fileInfo->isDir() ? 1 : 0, 'partition_number' => $partitionNumber,
+                    'product_name' => $metadata['product_name'], 'product_version' => $metadata['product_version'],
+                    'exiftool_json' => $exiftoolJson, 'thumbnail_path' => null, 'last_scan_id' => $scanId,
+                ];
+
+                if ($calculateMd5) {
+                    $fileData['md5_hash'] = $fileInfo->isDir() ? null : hash_file('md5', $path);
+                }
+
+                break; // Success, exit retry loop
+
+            } catch (Exception $e) {
+                if (strpos($e->getMessage(), 'stat failed') !== false) {
+                    echo "Warning: Caught I/O Error: " . $e->getMessage() . "\n";
+                    if (attempt_remount($mountPoint, $physicalSerial)) {
+                        echo "  > Retrying file operation...\n";
+                        continue; // Retry the operation on the same file
+                    } else {
+                        echo "Error: Could not recover drive. Aborting.\n";
+                        throw new Exception("Drive recovery failed.", 0, $e);
+                    }
+                } else {
+                    throw $e; // Re-throw other exceptions
+                }
             }
-            $params['md5_hash'] = $md5_hash;
         }
 
-        // Execute the prepared upsert statement with the collected parameters.
-        $upsertStmt->execute($params);
-        $rowCount = $upsertStmt->rowCount(); // Get the number of rows affected by the upsert.
+        if ($fileData === null) {
+            echo "Error: Could not process file {$relativePath} after retries. Skipping.\n";
+            continue;
+        }
+
+        // Execute the prepared upsert statement.
+        $upsertStmt->execute($fileData);
+        $rowCount = $upsertStmt->rowCount();
 
         // --- Thumbnail Generation ---
         if ($generateThumbnails && !$fileInfo->isDir() && $category === 'Image') {
@@ -764,79 +925,69 @@ try {
             }
         }
 
-        // Update statistics based on the upsert result.
-        if ($rowCount === 1) { // A new row was inserted.
-            $stats['added']++;
-            // A newly added file was not in the initial set of files marked for deletion.
-        } elseif ($rowCount === 2) { // An existing row was updated.
-            $stats['updated']++;
-        }
+        if ($rowCount === 1) $stats['added']++;
+        elseif ($rowCount === 2) $stats['updated']++;
+
+        // Commit progress periodically
+        commit_progress($pdo, $scanId, $relativePath, $stats);
     }
 
-    // Add a blank line for better readability in the console output.
-    echo "\n";
-
-    // 4. Update the `date_updated` timestamp on the parent drive record in `st_drives`.
-    echo "Step 3: Finalizing scan and updating drive timestamp...\n";
+    // Commit any remaining changes in the last batch
+    $pdo->commit();
+    echo "\nStep 3: Finalizing scan and updating drive timestamp...\n";
     $stmt = $pdo->prepare("UPDATE st_drives SET date_updated = NOW() WHERE id = ?");
     $stmt->execute([$driveId]);
 
-    // 5. Commit the database transaction.
-    $pdo->commit();
+    // Final step: Mark the scan as completed
+    $duration = microtime(true) - $startTime;
+    $finalStmt = $pdo->prepare("UPDATE st_scans SET status = 'completed', scan_duration = ? WHERE scan_id = ?");
+    $finalStmt->execute([round($duration), $scanId]);
+    
+    // Unset the global scanId to prevent the shutdown function from marking a completed scan as interrupted
+    $GLOBALS['scanId'] = null;
 
 } catch (\Exception $e) {
-    // If any exception occurs during the process, roll back all changes made within the transaction.
-    $pdo->rollBack();
-    echo "\nERROR: An exception occurred. Rolling back changes.\n";
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    echo "\nERROR: An unrecoverable exception occurred. Scan has been marked as interrupted.\n";
     echo $e->getMessage() . "\n";
+    // The shutdown function will handle marking the scan as interrupted.
     exit(1);
 }
 
-// Calculate the total duration of the scan.
-$endTime = microtime(true);
-$duration = $endTime - $startTime;
+// --- Final Statistics Calculation and Output ---
+$finalStatsStmt = $pdo->prepare("SELECT * FROM st_scans WHERE scan_id = ?");
+$finalStatsStmt->execute([$scanId]);
+$finalStats = $finalStatsStmt->fetch();
 
-// Format the duration for display.
-if ($duration < 60) {
-    $durationFormatted = round($duration, 2) . " seconds";
-} else {
-    $minutes = floor($duration / 60);
-    $seconds = round($duration % 60);
+// Recalculate deleted files count if it was a fresh scan
+if (!$resumeScan && !$skipExisting) {
+    $deletedStmt = $pdo->prepare("SELECT COUNT(*) FROM st_files WHERE drive_id = ? AND date_deleted = ?");
+    $deletedStmt->execute([$driveId, $scanStartTimeForDeletion]);
+    $finalStats['files_marked_deleted'] = $deletedStmt->fetchColumn();
+    
+    // Update the final count in the database
+    $updateDeletedStmt = $pdo->prepare("UPDATE st_scans SET files_marked_deleted = ? WHERE scan_id = ?");
+    $updateDeletedStmt->execute([$finalStats['files_marked_deleted'], $scanId]);
+}
+
+$durationFormatted = round($finalStats['scan_duration']) . " seconds";
+if ($finalStats['scan_duration'] > 60) {
+    $minutes = floor($finalStats['scan_duration'] / 60);
+    $seconds = $finalStats['scan_duration'] % 60;
     $durationFormatted = "{$minutes} minutes, {$seconds} seconds";
 }
 
-// Recalculate deleted files count
-$deletedStmt = $pdo->prepare("SELECT COUNT(*) FROM st_files WHERE drive_id = ? AND date_deleted = ?");
-$deletedStmt->execute([$driveId, $scanStartTimeForDeletion]);
-$stats['deleted'] = $deletedStmt->fetchColumn();
-
-// Update the scan record with final statistics
-$updateScanStmt = $pdo->prepare(
-    "UPDATE st_scans SET\n        total_items_scanned = ?,\n        new_files_added = ?,\n        existing_files_updated = ?,\n        files_marked_deleted = ?,\n        scan_duration = ?,\n        thumbnails_created = ?,\n        thumbnail_creations_failed = ?\n     WHERE scan_id = ?"
-);
-$updateScanStmt->execute([
-    $stats['scanned'],
-    $stats['added'],
-    $stats['updated'],
-    $stats['deleted'],
-    round($duration), // Store duration in seconds
-    $stats['thumbnails_created'],
-    $stats['thumbnails_failed'],
-    $scanId
-]);
-
-// --- Scan Summary Output ---
 echo "\n--- Scan Complete ---\n";
-echo "Total Items Scanned:  " . number_format($stats['scanned']) . "\n";
-echo "New Files Added:      " . number_format($stats['added']) . "\n";
-echo "Existing Files Updated: " . number_format($stats['updated']) . "\n";
-echo "Files Marked Deleted: " . number_format($stats['deleted']) . "\n";
+echo "Total Items Scanned:  " . number_format($finalStats['total_items_scanned']) . "\n";
+echo "New Files Added:      " . number_format($finalStats['new_files_added']) . "\n";
+echo "Existing Files Updated: " . number_format($finalStats['existing_files_updated']) . "\n";
+echo "Files Marked Deleted: " . number_format($finalStats['files_marked_deleted']) . "\n";
 if ($generateThumbnails) {
-    echo "Thumbnails Created:   " . number_format($stats['thumbnails_created']) . "\n";
-    echo "Thumbnails Failed:    " . number_format($stats['thumbnails_failed']) . "\n";
-    echo "Thumbnails Size:      " . formatBytes($stats['thumbnails_size']) . "\n";
+    echo "Thumbnails Created:   " . number_format($finalStats['thumbnails_created']) . "\n";
+    echo "Thumbnails Failed:    " . number_format($finalStats['thumbnail_creations_failed']) . "\n";
+    // Note: Thumbnails size is not tracked incrementally in this version.
 }
 echo "Scan Duration:        {$durationFormatted}\n";
 echo "---------------------\n";
-
-?>
