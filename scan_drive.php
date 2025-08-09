@@ -180,7 +180,7 @@ if (function_exists('pcntl_async_signals')) {
 
 function handle_shutdown() {
     global $pdo, $scanId;
-    // This function will be called on script exit
+    // This function will be called on script exit or upon signal
     $error = error_get_last();
     // We only mark as interrupted if it's a fatal error or signal
     if ($scanId && ($error !== null || php_sapi_name() === 'cli')) {
@@ -191,6 +191,8 @@ function handle_shutdown() {
         } catch (PDOException $e) {
             // Cannot connect to DB, nothing to do.
         }
+        // Terminate the script immediately after handling the shutdown
+        exit(1);
     }
 }
 
