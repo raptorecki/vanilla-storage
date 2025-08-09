@@ -568,6 +568,14 @@ function getExecutableInfo(string $filePath, string $exiftoolPath): array
 function queueThumbnail(PDO $pdo, int $fileId): bool
 {
     try {
+        // Check if the file is already in the queue (pending or completed)
+        $checkStmt = $pdo->prepare("SELECT 1 FROM st_thumbnail_queue WHERE file_id = ? AND (status = 'pending' OR status = 'completed')");
+        $checkStmt->execute([$fileId]);
+        if ($checkStmt->fetch()) {
+            // File already in queue or thumbnail already generated, no need to re-queue
+            return true;
+        }
+
         $stmt = $pdo->prepare(
             "INSERT INTO st_thumbnail_queue (file_id, status) VALUES (?, 'pending')"
         );
