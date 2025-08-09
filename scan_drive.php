@@ -180,7 +180,7 @@ if (function_exists('pcntl_async_signals')) {
 
 function handle_shutdown() {
     global $pdo, $scanId;
-    // This function will be called on script exit or upon signal
+    // This function will be called on script exit
     $error = error_get_last();
     // We only mark as interrupted if it's a fatal error or signal
     if ($scanId && ($error !== null || php_sapi_name() === 'cli')) {
@@ -191,8 +191,6 @@ function handle_shutdown() {
         } catch (PDOException $e) {
             // Cannot connect to DB, nothing to do.
         }
-        // Terminate the script immediately after handling the shutdown
-        exit(1);
     }
 }
 
@@ -680,38 +678,8 @@ try {
     $scanStartTimeForDeletion = date('Y-m-d H:i:s');
     if (!$resumeScan && !$skipExisting) {
         echo "Step 1: Marking existing files for deletion check...\n";
-        $maxRetries = 5;
-        $retryDelaySeconds = 2; // Wait 2 seconds before retrying
-
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
-            try {
-                // Temporarily increase lock wait timeout for this specific transaction
-                $pdo->exec("SET SESSION innodb_lock_wait_timeout = 60;"); // 60 seconds
-
-                // Ensure this update is in its own transaction to minimize lock contention
-                // and allow it to be retried independently.
-                $pdo->beginTransaction();
-                $stmt = $pdo->prepare("UPDATE st_files SET date_deleted = ? WHERE drive_id = ? AND date_deleted IS NULL");
-                $stmt->execute([$scanStartTimeForDeletion, $driveId]);
-                $pdo->commit();
-                echo "  > Marked existing files for deletion check successfully.\n";
-                break; // Success, exit retry loop
-            } catch (PDOException $e) {
-                $pdo->rollBack(); // Rollback the failed transaction
-                log_error("Attempt {$attempt} failed to mark files for deletion for drive ID {$driveId}: " . $e->getMessage());
-
-                if ($e->getCode() == 'HY000' && strpos($e->getMessage(), 'Lock wait timeout exceeded') !== false && $attempt < $maxRetries) {
-                    echo "  > Lock wait timeout exceeded. Retrying in {$retryDelaySeconds} seconds (Attempt {$attempt}/{$maxRetries})...\n";
-                    sleep($retryDelaySeconds);
-                } else {
-                    echo "  > Failed to mark existing files for deletion after {$attempt} attempts. Error: " . $e->getMessage() . "\n";
-                    throw $e; // Re-throw if it's not a lock timeout or max retries reached
-                }
-            } finally {
-                // Reset lock wait timeout to default (or a lower value if desired)
-                $pdo->exec("SET SESSION innodb_lock_wait_timeout = DEFAULT;");
-            }
-        }
+        $stmt = $pdo->prepare("UPDATE st_files SET date_deleted = ? WHERE drive_id = ? AND date_deleted IS NULL");
+        $stmt->execute([$scanStartTimeForDeletion, $driveId]);
     } else {
         echo "Step 1: Skipped marking files for deletion due to --resume or --skip-existing flag.\n";
     }
