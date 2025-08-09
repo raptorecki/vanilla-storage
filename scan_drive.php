@@ -46,7 +46,7 @@ $args = $argv;
 array_shift($args); // Remove the script name itself.
 
 // --- Configuration ---
-$commitInterval = 100; // Commit progress to the database every 100 files.
+$commitInterval = 10; // Commit progress to the database every 10 files.
 
 // Initialize flags with default values.
 $calculateMd5 = true;
@@ -54,6 +54,7 @@ $updateDriveInfo = true;
 $generateThumbnails = true;
 $resumeScan = false;
 $skipExisting = false;
+$debugMode = false; // New debug flag
 
 // Create a mapping for flags to their variables.
 $flagMap = [
@@ -62,13 +63,16 @@ $flagMap = [
     '--no-thumbnails' => &$generateThumbnails,
     '--resume' => &$resumeScan,
     '--skip-existing' => &$skipExisting,
+    '--debug' => &$debugMode, // New debug flag
 ];
 
 // Process flags.
 foreach ($flagMap as $flag => &$variable) {
     if (($key = array_search($flag, $args)) !== false) {
-        $variable = ($flag === '--resume' || $flag === '--skip-existing'); // Set boolean flags
-        if ($variable === false) { // For --no-* flags
+        // For --resume, --skip-existing, and --debug, set to true if present
+        if ($flag === '--resume' || $flag === '--skip-existing' || $flag === '--debug') {
+            $variable = true;
+        } else { // For --no-* flags, set to false if present
             $variable = false;
         }
         unset($args[$key]);
@@ -87,6 +91,7 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --no-thumbnails         Skip generating thumbnails for image files.\n" .
     "  --resume                Resume an interrupted scan for the specified drive.\n" .
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
+    "  --debug                 Enable verbose debug output.\n" .
     "  --help                  Display this help message.\n";
 
 // Check for --help flag first
@@ -568,20 +573,37 @@ function getExecutableInfo(string $filePath, string $exiftoolPath): array
 function queueThumbnail(PDO $pdo, int $fileId): bool
 {
     try {
+        global $debugMode; // Access the global debugMode variable
+        if ($debugMode) { echo "  > DEBUG: Inside queueThumbnail for fileId: {$fileId}\n"; }
+
         // Check if the file is already in the queue (pending or completed)
         $checkStmt = $pdo->prepare("SELECT 1 FROM st_thumbnail_queue WHERE file_id = ? AND (status = 'pending' OR status = 'completed')");
         $checkStmt->execute([$fileId]);
         if ($checkStmt->fetch()) {
+            if ($debugMode) { echo "  > DEBUG: fileId {$fileId} already in queue or completed. Skipping insert.\n"; }
             // File already in queue or thumbnail already generated, no need to re-queue
             return true;
         }
 
+        if ($debugMode) { echo "  > DEBUG: fileId {$fileId} not found in queue. Attempting insert.\n"; }
+
+        // Temporarily enable autocommit to ensure this insert is atomic and committed immediately
+        // without affecting the main transaction's state.
+        $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, true);
+
         $stmt = $pdo->prepare(
             "INSERT INTO st_thumbnail_queue (file_id, status) VALUES (?, 'pending')"
         );
-        return $stmt->execute([$fileId]);
+        $result = $stmt->execute([$fileId]);
+
+        // Re-disable autocommit
+        $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, false);
+
+        if ($debugMode) { echo "  > DEBUG: Insert result for fileId {$fileId}: " . ($result ? 'true' : 'false') . "\n"; }
+        return $result;
     } catch (PDOException $e) {
         log_error("Failed to queue thumbnail for file_id {$fileId}: " . $e->getMessage());
+        if ($debugMode) { echo "  > DEBUG: PDOException in queueThumbnail for fileId {$fileId}: " . $e->getMessage() . "\n"; }
         return false;
     }
 }
@@ -871,20 +893,26 @@ try {
 
         // --- Thumbnail Queueing ---
         if ($generateThumbnails && !$fileInfo->isDir() && $category === 'Image') {
+            if ($debugMode) { echo "  > DEBUG: Attempting to queue thumbnail for: {$relativePath}\n"; }
             $fileId = $pdo->lastInsertId();
+            if ($debugMode) { echo "  > DEBUG: fileId from lastInsertId(): {$fileId}\n"; }
             // If the row was updated, lastInsertId will be 0. We need to get the ID.
             if ($fileId == 0) {
                 $idStmt = $pdo->prepare("SELECT id FROM st_files WHERE drive_id = ? AND path_hash = ?");
                 $idStmt->execute([$driveId, hash('sha256', $relativePath)]);
                 $fileId = $idStmt->fetchColumn();
+                if ($debugMode) { echo "  > DEBUG: fileId from SELECT fallback: {$fileId}\n"; }
             }
 
             if ($fileId) {
+                if ($debugMode) { echo "  > DEBUG: Valid fileId ({$fileId}) obtained. Calling queueThumbnail.\n"; }
                 if (queueThumbnail($pdo, $fileId)) {
                     $stats['thumbnails_queued']++;
                 } else {
                     $stats['thumbnails_failed_to_queue']++;
                 }
+            } else {
+                if ($debugMode) { echo "  > DEBUG: Invalid fileId ({$fileId}) for {$relativePath}. Skipping thumbnail queueing.\n"; }
             }
         }
 
