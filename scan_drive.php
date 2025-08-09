@@ -203,8 +203,8 @@ if (function_exists('pcntl_async_signals')) {
 }
 
 // Define a final shutdown function that handles cleanup
-register_shutdown_function(function() use ($scanId, &$pdo) {
-    global $interrupted;
+register_shutdown_function(function() use ($scanId) {
+    global $interrupted, $pdo, $current_scanned_path; // Access $pdo and $current_scanned_path globally
     // Check if the script was interrupted or if there was a fatal error
     $error = error_get_last();
     $isFatalError = ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR]));
@@ -215,8 +215,6 @@ register_shutdown_function(function() use ($scanId, &$pdo) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            // Access global current_scanned_path
-            global $current_scanned_path;
             $stmt = $pdo->prepare("UPDATE st_scans SET status = 'interrupted', last_scanned_path = ? WHERE scan_id = ? AND status = 'running'");
             $stmt->execute([$current_scanned_path, $scanId]);
             echo "\nScan interrupted. Run with --resume to continue.\n";
