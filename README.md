@@ -35,6 +35,18 @@ A simple PHP and MySQL-based application for tracking storage drives and their c
 4.  Copy `config.php.example` to `config.php` and update it with your database credentials.
 5.  Use the `scan_drive.php` script to index your drives. See the **Scanning Drives** section below for detailed instructions.
 
+## Dependencies
+
+The `scan_drive.php` script relies on several external tools and PHP extensions for full functionality:
+
+*   **`ffprobe`**: (Part of FFmpeg) Required for extracting metadata (codec, resolution, duration) from video and audio files.
+*   **`exiftool`**: Required for extracting metadata (Product Name, Product Version) from executable files and comprehensive file information.
+*   **`php-exif` extension**: PHP extension required for extracting EXIF data (date taken, camera model) from image files.
+*   **`php-gd` extension**: PHP extension required for in-line thumbnail generation.
+*   **`hdparm`**: (Linux only) Used for reading physical serial and model numbers of SATA drives.
+*   **`lsblk`**: (Linux only) Used for identifying block devices and their filesystem types.
+*   **`df`**: (Linux only) Used for determining the source device of a mounted filesystem.
+
 ## Scanning Drives
 
 The `scan_drive.php` script is a powerful command-line tool for indexing the contents of your storage drives. It is designed to be robust, allowing for resumable scans and automatic recovery from common errors.
@@ -42,7 +54,7 @@ The `scan_drive.php` script is a powerful command-line tool for indexing the con
 ### Usage
 
 ```bash
-sudo php scan_drive.php [options] <drive_id> <partition_number> <mount_point>
+sudo php scan_drive.php [--no-md5] [--no-drive-info-update] [--no-thumbnails] [--use-external-thumb-gen] [--resume] [--skip-existing] [--debug] <drive_id> <partition_number> <mount_point>
 ```
 
 ### Arguments
@@ -57,9 +69,11 @@ The script accepts several optional flags to control its behavior:
 
 *   `--no-md5`: Skips the calculation of MD5 hashes for each file. This significantly speeds up the scanning process.
 *   `--no-drive-info-update`: Prevents the script from automatically updating the drive's model, serial number, and filesystem type in the database.
-*   `--no-thumbnails`: **(Updated)** This flag now prevents `scan_drive.php` from queuing thumbnail generation requests for image files. Thumbnail generation is now handled asynchronously by a separate script.
+*   `--no-thumbnails`: Skips generating thumbnails for image files. If `--use-external-thumb-gen` is also used, this flag is redundant as in-line thumbnail generation is already disabled.
+*   `--use-external-thumb-gen`: Disables in-line thumbnail generation in `scan_drive.php`, allowing an external script (like `generate_thumbnails.php`) to handle thumbnail creation asynchronously.
 *   `--resume`: If a previous scan was interrupted, this flag allows you to resume the scan from the last successfully processed file, preventing you from having to start over.
 *   `--skip-existing`: This flag tells the script to ignore any file that already exists in the database for that drive. This is very useful for quickly adding new files to a drive that has already been scanned.
+*   `--debug`: Enables verbose debug output during the scan process.
 
 ### Automatic Error Recovery
 
