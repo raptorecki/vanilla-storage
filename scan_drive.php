@@ -323,10 +323,7 @@ try {
             if ($line === 'yes') {
                 echo "\nUser confirmed. Continuing with scan...\n\n";
                 break;
-            } elseif ($line === 'no') {
-                echo "Aborting scan.\n";
-                exit(2);
-            }
+            } elseif ($line === 'no') {                echo "Aborting scan.\n";                $GLOBALS['interrupted'] = true; // Mark as interrupted                exit(2);            }
         }
     }
 
@@ -366,6 +363,8 @@ try {
     // Catch any exceptions during drive verification and log/display the error.
     log_error("Error during drive verification: " . $e->getMessage());
     echo "Error during drive verification. Check logs for details.\n";
+    // Manually flag as interrupted so the shutdown function correctly marks the scan status.
+    $GLOBALS['interrupted'] = true;
     exit(1);
 }
 
@@ -1034,6 +1033,8 @@ try {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
+    // Manually flag as interrupted so the shutdown function correctly marks the scan status.
+    $GLOBALS['interrupted'] = true;
     echo "\nERROR: An unrecoverable exception occurred. Scan has been marked as interrupted.\n";
     echo $e->getMessage() . "\n";
     // The shutdown function will handle marking the scan as interrupted.
