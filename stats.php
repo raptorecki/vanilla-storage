@@ -43,7 +43,7 @@ try {
             COUNT(id) AS total_files,
             SUM(size) AS total_used_bytes
         FROM st_files
-        WHERE is_directory = 0 AND date_deleted IS NULL
+        WHERE date_deleted IS NULL
     ")->fetch();
 
     if ($file_summary_stats) {
@@ -57,7 +57,7 @@ try {
             file_category,
             COUNT(id) AS file_count
         FROM st_files
-        WHERE is_directory = 0 AND date_deleted IS NULL
+        WHERE date_deleted IS NULL
         GROUP BY file_category
         ORDER BY file_count DESC
     ")->fetchAll();
@@ -73,8 +73,7 @@ try {
             st_files AS f
         JOIN
             st_drives AS d ON f.drive_id = d.id
-        WHERE
-            f.is_directory = 0 AND f.date_deleted IS NULL
+        WHERE f.date_deleted IS NULL
         ORDER BY
             f.size DESC
         LIMIT :limit
@@ -97,7 +96,7 @@ try {
             FROM
                 st_drives d
             LEFT JOIN
-                st_files f ON d.id = f.drive_id AND f.is_directory = 0 AND f.date_deleted IS NULL
+                st_files f ON d.id = f.drive_id AND f.date_deleted IS NULL
             WHERE d.dead = 0
             GROUP BY
                 d.id, d.name, d.an_serial, d.serial, d.size

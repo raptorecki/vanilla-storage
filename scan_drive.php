@@ -323,7 +323,11 @@ try {
             if ($line === 'yes') {
                 echo "\nUser confirmed. Continuing with scan...\n\n";
                 break;
-            } elseif ($line === 'no') {                echo "Aborting scan.\n";                $GLOBALS['interrupted'] = true; // Mark as interrupted                exit(2);            }
+            } elseif ($line === 'no') {
+                echo "Aborting scan.\n";
+                $GLOBALS['interrupted'] = true; // Mark as interrupted
+                exit(2);
+            }
         }
     }
 
@@ -366,7 +370,7 @@ try {
     // Manually flag as interrupted so the shutdown function correctly marks the scan status.
     $GLOBALS['interrupted'] = true;
     exit(1);
-}
+}    
 
 // Record the start time of the scan for duration calculation.
 $startTime = microtime(true);
@@ -797,15 +801,8 @@ try {
     // This is the main transaction for a batch of files.
     $pdo->beginTransaction();
 
-    // Step 1: Mark existing files for deletion check (only for new, non-skip scans)
-    $scanStartTimeForDeletion = date('Y-m-d H:i:s');
-    if (!$resumeScan && !$skipExisting) {
-        echo "Step 1: Marking existing files for deletion check...\n";
-        $stmt = $pdo->prepare("UPDATE st_files SET date_deleted = ? WHERE drive_id = ? AND date_deleted IS NULL");
-        $stmt->execute([$scanStartTimeForDeletion, $driveId]);
-    } else {
-        echo "Step 1: Skipped marking files for deletion due to --resume or --skip-existing flag.\n";
-    }
+    // Step 1: File scan will begin. Deleted files will be marked at the end of a completed scan.
+echo "Step 1: Beginning filesystem scan...\n";
 
     // Step 2: Prepare the main SQL statement for inserting or updating file records.
     $update_clauses = [
@@ -1025,6 +1022,19 @@ try {
     $duration = microtime(true) - $startTime;
     $finalStmt = $pdo->prepare("UPDATE st_scans SET status = 'completed', scan_duration = ?, files_skipped = ? WHERE scan_id = ?");
     $finalStmt->execute([round($duration), $stats['skipped'], $scanId]);
+
+    // New Step: Mark files that were not found in this scan as deleted
+    echo "\nStep 4: Marking files not found in this scan as deleted...\n";
+    $markDeletedStmt = $pdo->prepare(
+        "UPDATE st_files SET date_deleted = NOW() WHERE drive_id = ? AND (last_scan_id != ? OR last_scan_id IS NULL) AND date_deleted IS NULL"
+    );
+    $markDeletedStmt->execute([$driveId, $scanId]);
+    $deletedCount = $markDeletedStmt->rowCount();
+    echo "  > Marked {$deletedCount} files as deleted.\n";
+
+    // Update the final stats with the correct deleted count
+    $updateDeletedStmt = $pdo->prepare("UPDATE st_scans SET files_marked_deleted = ? WHERE scan_id = ?");
+    $updateDeletedStmt->execute([$deletedCount, $scanId]);
     
     // Unset the global scanId to prevent the shutdown function from marking a completed scan as interrupted
     $GLOBALS['scanId'] = null;
@@ -1046,16 +1056,7 @@ $finalStatsStmt = $pdo->prepare("SELECT * FROM st_scans WHERE scan_id = ?");
 $finalStatsStmt->execute([$scanId]);
 $finalStats = $finalStatsStmt->fetch();
 
-// Recalculate deleted files count if it was a fresh scan
-if (!$resumeScan && !$skipExisting) {
-    $deletedStmt = $pdo->prepare("SELECT COUNT(*) FROM st_files WHERE drive_id = ? AND date_deleted = ?");
-    $deletedStmt->execute([$driveId, $scanStartTimeForDeletion]);
-    $finalStats['files_marked_deleted'] = $deletedStmt->fetchColumn();
-    
-    // Update the final count in the database
-    $updateDeletedStmt = $pdo->prepare("UPDATE st_scans SET files_marked_deleted = ? WHERE scan_id = ?");
-    $updateDeletedStmt->execute([$finalStats['files_marked_deleted'], $scanId]);
-}
+
 
 $durationFormatted = round($finalStats['scan_duration']) . " seconds";
 if ($finalStats['scan_duration'] > 60) {
