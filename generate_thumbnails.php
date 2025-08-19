@@ -172,16 +172,8 @@ while (true) {
                 throw new Exception("File with ID {$fileId} not found in st_files.");
             }
 
-            // Get mount point for the drive
-            $driveStmt = $pdo->prepare("SELECT mount_point FROM st_drives WHERE id = ?");
-            $driveStmt->execute([$fileData['drive_id']]);
-            $driveData = $driveStmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$driveData || empty($driveData['mount_point'])) {
-                throw new Exception("Mount point not found for drive ID {$fileData['drive_id']}.");
-            }
-
-            $fullFilePath = rtrim($driveData['mount_point'], '/') . '/' . ltrim($fileData['path'], '/');
+            // Mount point will be determined from CLI argument or config.php
+            $fullFilePath = rtrim($thumbnailSourceBasePath, '/') . '/' . ltrim($fileData['path'], '/');
 
             if (!file_exists($fullFilePath)) {
                 throw new Exception("Source file does not exist: {$fullFilePath}");

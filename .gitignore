@@ -7,6 +7,5 @@ composer.lock
 helpers/
 tests/
 logs/
-logs/application.log
 thumbnails/
 *.sql
