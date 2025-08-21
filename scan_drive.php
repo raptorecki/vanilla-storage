@@ -475,6 +475,43 @@ function getAudioInfo(string $filePath, string $ffprobePath): ?array
 }
 
 /**
+ * Parses and validates a date string from EXIF data.
+ *
+ * - Converts various EXIF date formats (including ISO 8601 with timezones)
+ *   to a MySQL-compatible 'Y-m-d H:i:s' format.
+ * - Returns null if the date is empty, invalid, or before a reasonable
+ *   threshold (1980) to filter out "garbage" dates.
+ *
+ * @param string|null $dateString The date string from EXIF data.
+ * @return string|null The formatted date string or null if invalid.
+ */
+function parseAndValidateExifDate(?string $dateString): ?string
+{
+    if (empty($dateString)) {
+        return null;
+    }
+
+    try {
+        // The DateTime constructor is powerful and can parse many formats,
+        // including the ISO 8601 format with 'T' and timezone offsets.
+        $date = new DateTime($dateString);
+
+        // Sanity check: if the year is before 1980, consider it invalid.
+        if ((int)$date->format('Y') < 1980) {
+            return null;
+        }
+
+        // Return the date in the format MySQL expects.
+        return $date->format('Y-m-d H:i:s');
+    } catch (Exception $e) {
+        // If parsing fails for any reason, return null.
+        log_error("Failed to parse date string: '{$dateString}'. Error: " . $e->getMessage());
+        return null;
+    }
+}
+
+
+/**
  * Extracts image metadata using native PHP functions.
  * @param string $filePath The full path to the image file.
  * @return array|null An array with metadata (format, resolution, exif_date_taken, exif_camera_model) or null on failure.
@@ -493,7 +530,8 @@ function getImageInfo(string $filePath): ?array
         $exif = @exif_read_data($filePath); // Read EXIF data.
         if ($exif !== false) {
             // Prioritize 'DateTimeOriginal' for date taken, fall back to 'DateTime'.
-            $exif_data['date_taken'] = $exif['DateTimeOriginal'] ?? $exif['DateTime'] ?? null;
+            $rawDate = $exif['DateTimeOriginal'] ?? $exif['DateTime'] ?? null;
+            $exif_data['date_taken'] = parseAndValidateExifDate($rawDate); // Validate and format the date
             $exif_data['camera_model'] = isset($exif['Model']) ? trim($exif['Model']) : null;
         }
     }
