@@ -1077,14 +1077,30 @@ echo "Step 1: Beginning filesystem scan...\n";
     // Unset the global scanId to prevent the shutdown function from marking a completed scan as interrupted
     $GLOBALS['scanId'] = null;
 
-} catch (\Exception $e) {
+} catch (
+Exception $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
     // Manually flag as interrupted so the shutdown function correctly marks the scan status.
     $GLOBALS['interrupted'] = true;
+
+    // Construct a detailed error message for logging
+    $logMessage = "Unrecoverable exception during scan.";
+    if (!empty($GLOBALS['current_scanned_path'])) {
+        $logMessage .= " Failing file: " . $GLOBALS['current_scanned_path'] . ".";
+    }
+    $logMessage .= " Details: " . $e->getMessage();
+    log_error($logMessage); // Log the error to application.log
+
+    // Display the error to the console
     echo "\nERROR: An unrecoverable exception occurred. Scan has been marked as interrupted.\n";
-    echo $e->getMessage() . "\n";
+    if (!empty($GLOBALS['current_scanned_path'])) {
+        echo "Failing file: " . $GLOBALS['current_scanned_path'] . "\n";
+    }
+    echo "Error details: " . $e->getMessage() . "\n";
+    echo "The error has been recorded in application.log.\n";
+
     // The shutdown function will handle marking the scan as interrupted.
     exit(1);
 }
