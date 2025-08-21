@@ -33,6 +33,13 @@ if (php_sapi_name() !== 'cli') {
     die("This script can only be run from the command line.");
 }
 
+// Check for --version flag
+if (in_array('--version', $argv)) {
+    $versionConfig = require __DIR__ . '/version.php';
+    echo basename(__FILE__) . " version " . ($versionConfig['app_version'] ?? 'unknown') . "\n";
+    exit(0);
+}
+
 // Include necessary external files.
 // 'database.php' provides the PDO database connection ($pdo object).
 // 'helpers/error_logger.php' provides a function for logging errors.
@@ -99,7 +106,8 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --resume                Resume an interrupted scan for the specified drive.\n" .
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
     "  --debug                 Enable verbose debug output.\n" .
-    "  --help                  Display this help message.\n";
+    "  --help                  Display this help message.\n" .
+    "  --version               Display the application version.\n";
 
 // Check for --help flag first
 if (in_array('--help', $argv)) {
