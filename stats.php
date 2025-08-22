@@ -39,9 +39,9 @@ try {
 
     // 2. Get file stats: total count and total size used
     $file_summary_stats = $pdo->query("
+        SELECT
             COUNT(id) AS total_files,
-                   SELECT
- SUM(size) AS total_used_bytes
+            SUM(size) AS total_used_bytes
         FROM st_files
         WHERE date_deleted IS NULL
     ")->fetch();
