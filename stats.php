@@ -181,60 +181,62 @@ try {
         <div class="stat-card"><h3>Drives Scanned (Completed)</h3><p><?= number_format($stats['drives_scanned_completed']) ?></p></div>
     </div>
 
-    <h2>Files by Category</h2>
-    <?php if (empty($stats['files_by_category'])): ?>
-        <p>No file data available to generate category statistics.</p>
-    <?php else: ?>
-        <table><thead><tr><th>Category</th><th>File Count</th></tr></thead>
-            <tbody><?php foreach ($stats['files_by_category'] as $category): ?><tr><td><?= htmlspecialchars($category['file_category']) ?></td><td><?= number_format($category['file_count']) ?></td></tr><?php endforeach; ?></tbody>
-        </table>
-    <?php endif; ?>
+    <details style="margin-top: 25px;">
+        <summary><h2>Files by Category</h2></summary>
+        <?php if (empty($stats['files_by_category'])): ?>
+            <p>No file data available to generate category statistics.</p>
+        <?php else: ?>
+            <table><thead><tr><th>Category</th><th>File Count</th></tr></thead>
+                <tbody><?php foreach ($stats['files_by_category'] as $category): ?><tr><td><?= htmlspecialchars($category['file_category']) ?></td><td><?= number_format($category['file_count']) ?></td></tr><?php endforeach; ?></tbody>
+            </table>
+        <?php endif; ?>
+    </details>
 
-    <h2>Largest Files</h2>
-    <div class="table-toolbar">
-        <form action="stats.php" method="get">
-            <label for="limit">Show:</label>
-            <select name="limit" id="limit" onchange="this.form.submit()">
-                <?php foreach ($limit_options as $option): ?>
-                    <option value="<?= $option ?>" <?= ($limit == $option) ? 'selected' : '' ?>><?= $option ?></option>
-                <?php endforeach; ?>
-            </select>
-        </form>
-    </div>
-    <?php if (empty($stats['largest_files'])): ?>
-        <p>No file data available to determine largest files.</p>
-    <?php else: ?>
-        <table>
-            <thead>
-                <tr>
-                    <th>File Path</th>
-                    <th>Size</th>
-                    <th>Name</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($stats['largest_files'] as $file): ?>
+    <details>
+        <summary><h2>Largest Files</h2></summary>
+        <div class="table-toolbar">
+            <form action="stats.php" method="get">
+                <label for="limit">Show:</label>
+                <select name="limit" id="limit" onchange="this.form.submit()">
+                    <?php foreach ($limit_options as $option): ?>
+                        <option value="<?= $option ?>" <?= ($limit == $option) ? 'selected' : '' ?>><?= $option ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+        </div>
+        <?php if (empty($stats['largest_files'])): ?>
+            <p>No file data available to determine largest files.</p>
+        <?php else: ?>
+            <table>
+                <thead>
                     <tr>
-                        <td>
-                            <?php
-                                $dir_path = dirname($file['path']);
-                                $link_path = ($dir_path === '.' || $dir_path === '/') ? '' : ltrim($dir_path, '/');
-                            ?>
-                            <a href="browse.php?drive_id=<?= htmlspecialchars($file['drive_id']) ?>&path=<?= urlencode($link_path) ?>" title="Browse directory"><?= htmlspecialchars($file['path']) ?></a>
-                        </td>
-                        <td><?= formatBytes($file['size']) ?></td>
-                        <td><a href="browse.php?drive_id=<?= htmlspecialchars($file['drive_id']) ?>"><?= htmlspecialchars($file['drive_name']) ?></a></td>
+                        <th>File Path</th>
+                        <th>Size</th>
+                        <th>Name</th>
                     </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    <?php endif; ?>
+                </thead>
+                <tbody>
+                    <?php foreach ($stats['largest_files'] as $file): ?>
+                        <tr>
+                            <td>
+                                <?php
+                                    $dir_path = dirname($file['path']);
+                                    $link_path = ($dir_path === '.' || $dir_path === '/') ? '' : ltrim($dir_path, '/');
+                                ?>
+                                <a href="browse.php?drive_id=<?= htmlspecialchars($file['drive_id']) ?>&path=<?= urlencode($link_path) ?>" title="Browse directory"><?= htmlspecialchars($file['path']) ?></a>
+                            </td>
+                            <td><?= formatBytes($file['size']) ?></td>
+                            <td><a href="browse.php?drive_id=<?= htmlspecialchars($file['drive_id']) ?>"><?= htmlspecialchars($file['drive_name']) ?></a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </details>
 
-    <div class="stats-grid" style="margin-top: 40px;">
-        
-        <div>
+    <div>
             <details>
-                <summary>Drives With Scan Required</summary>
+                <summary><h2>Drives With Scan Required</h2></summary>
                 <?php if (empty($stats['drives_scan_required'])): ?>
                     <p>No drives require a scan.</p>
                 <?php else: ?>
@@ -258,10 +260,8 @@ try {
                     </table>
                 <?php endif; ?>
             </details>
-        </div>
-        <div>
             <details>
-                <summary>Drives With Most Free Space</summary>
+                <summary><h2>Drives With Most Free Space</h2></summary>
                 <?php if (empty($stats['drives_most_free'])): ?>
                     <p>No drive data available.</p>
                 <?php else: ?>
@@ -303,10 +303,8 @@ try {
                     </table>
                 <?php endif; ?>
             </details>
-        </div>
-        <div>
             <details>
-                <summary>Drives With Most Data</summary>
+                <summary><h2>Drives With Most Data</h2></summary>
                 <?php if (empty($stats['drives_most_data'])): ?>
                     <p>No drive data available.</p>
                 <?php else: ?>
@@ -332,10 +330,8 @@ try {
                     </table>
                 <?php endif; ?>
             </details>
-        </div>
-        <div>
             <details>
-                <summary>Drives with SMART Issues</summary>
+                <summary><h2>Drives with SMART Issues</h2></summary>
                 <?php if (empty($stats['drives_with_smart_issues'])): ?>
                     <p>No drives with SMART issues detected.</p>
                 <?php else: ?>
@@ -374,7 +370,7 @@ try {
                 <?php endif; ?>
             </details>
         </div>
-    </div>
-<?php endif; ?>
+
+        <?php endif; ?>
 
 <?php require 'footer.php'; ?>

@@ -87,28 +87,28 @@ body {
             margin-bottom: 25px;
         }
         summary {
-            padding: 15px;
+            padding: 15px 0; /* Keep vertical padding, remove horizontal */
             font-weight: bold;
             cursor: pointer;
             outline: none;
             list-style: none; /* Remove default marker */
-            position: relative;
-            padding-right: 30px; /* Space for custom arrow */
+            display: flex;
+            align-items: center;
+            gap: 10px; /* Space between title and arrow */
         }
         summary::-webkit-details-marker {
             display: none; /* Hide default marker for Webkit browsers */
         }
-        summary::after {
+        summary::before {
             content: '\25B6'; /* Right-pointing triangle */
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
+            display: inline-block;
+            line-height: 1;
             transition: transform 0.2s;
+            margin-right: 10px; /* Add some space after the arrow */
         }
-        details[open] > summary::after {
+        details[open] > summary::before {
             content: '\25BC'; /* Down-pointing triangle */
-            transform: translateY(-50%) rotate(0deg);
+            transform: none; /* No rotation needed as content changes */
         }
         .form-container {
             padding: 0 20px 20px 20px;
@@ -160,6 +160,7 @@ body {
             border-collapse: collapse;
             margin-top: 20px;
             font-size: 0.9em;
+            padding: 0 15px; /* Add horizontal padding to the table */
         }
 
         th, td {
@@ -312,7 +313,9 @@ body {
             color: #ffffff;
         }
         summary h2 {
-            display: inline; /* Make h2 inline to prevent it from taking full width and pushing arrow */
+            display: inline;
+            margin: 0;
+            padding: 0;
         }
         .stat-card p {
             font-size: 2em;
