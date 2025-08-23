@@ -50,6 +50,27 @@ if ($thumb_file_id) {
     }
 }
 
+// --- Filetype Viewer ---
+$filetype_file_id = filter_input(INPUT_GET, 'view_filetype', FILTER_VALIDATE_INT);
+$filetype_data = null;
+$filetype_error = '';
+if ($filetype_file_id) {
+    try {
+        $stmt = $pdo->prepare("SELECT path, filetype FROM st_files WHERE id = ?");
+        $stmt->execute([$filetype_file_id]);
+        $file_data = $stmt->fetch();
+
+        if ($file_data && !empty($file_data['filetype'])) {
+            $filetype_data = $file_data['filetype'];
+        } else {
+            $filetype_error = 'No filetype data found for this file.';
+        }
+    } catch (\PDOException $e) {
+        $filetype_error = 'Error fetching filetype data.';
+        log_error("Filetype Fetch Error: " . $e->getMessage());
+    }
+}
+
 // --- Search & Pagination Configuration ---
 $search_params = [
     'filename' => trim($_GET['filename'] ?? ''), // This now accepts filename, path, or MD5
@@ -183,16 +204,16 @@ try {
 </div>
 <?php endif; ?>
 
-<?php if ($thumb_path): ?>
-<div class="thumbnail-viewer">
-    <h2>Thumbnail for: <?= htmlspecialchars($file_data['path']) ?></h2>
-    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>" class="close-thumb">Close</a>
-    <img src="<?= htmlspecialchars($thumb_path) ?>" alt="Thumbnail for <?= htmlspecialchars($file_data['path']) ?>">
+<?php if ($filetype_data): ?>
+<div class="filetype-viewer">
+    <h2>Filetype for: <?= htmlspecialchars($file_data['path']) ?></h2>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_filetype' => null])) ?>" class="close-filetype">Close</a>
+    <pre><?= htmlspecialchars($filetype_data) ?></pre>
 </div>
-<?php elseif ($thumb_error): ?>
-<div class="thumbnail-viewer error">
-    <p><?= htmlspecialchars($thumb_error) ?></p>
-    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>">Close</a>
+<?php elseif ($filetype_error): ?>
+<div class="filetype-viewer error">
+    <p><?= htmlspecialchars($filetype_error) ?></p>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_filetype' => null])) ?>">Close</a>
 </div>
 <?php endif; ?>
 
@@ -299,7 +320,10 @@ try {
                                 <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => $file['id']])) ?>" class="action-btn">Exif</a>
                             <?php endif; ?>
                             <?php if (!empty($file['thumbnail_path'])): ?>
-                                <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => $file['id']])) ?>" class="action-btn">Thumb</a>
+                                <?php if (!empty($file['exiftool_json'])): ?> | <?php endif; ?><a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => $file['id']])) ?>" class="action-btn">Thumb</a>
+                            <?php endif; ?>
+                            <?php if (!empty($file['filetype'])): ?>
+                                <?php if (!empty($file['exiftool_json']) || !empty($file['thumbnail_path'])): ?> | <?php endif; ?><a href="?<?= http_build_query(array_merge($_GET, ['view_filetype' => $file['id']])) ?>" class="action-btn">Filetype</a>
                             <?php endif; ?>
                         </td>
                     </tr>
