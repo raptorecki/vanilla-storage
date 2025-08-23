@@ -1013,39 +1013,52 @@ echo "Step 1: Beginning filesystem scan...\n";
         // 3. Handle thumbnail generation ONLY if necessary
         if ($generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
             $fileId = 0;
+            $existingThumbnailPath = null;
+
             // For newly inserted files, get the ID for free
             if ($rowCount === 1) {
                 $fileId = $pdo->lastInsertId();
             }
-            // For updated files, we must run a SELECT to get the existing ID
+            // For updated files, we must run a SELECT to get the existing ID and thumbnail path
             elseif ($rowCount === 2) {
-                $fileIdStmt = $pdo->prepare("SELECT id FROM st_files WHERE drive_id = ? AND path_hash = ?");
+                $fileIdStmt = $pdo->prepare("SELECT id, thumbnail_path FROM st_files WHERE drive_id = ? AND path_hash = ?");
                 $fileIdStmt->execute([$driveId, $fileData['path_hash']]);
-                $fileId = $fileIdStmt->fetchColumn();
+                $existingFileData = $fileIdStmt->fetch();
+                if ($existingFileData) {
+                    $fileId = $existingFileData['id'];
+                    $existingThumbnailPath = $existingFileData['thumbnail_path'];
+                }
             }
 
             // 4. If we have a valid fileId, proceed with thumbnailing
             if ($fileId) {
-                $thumbnailRelPath = getThumbnailPath($fileId);
-                if (!empty($thumbnailRelPath)) {
-                    $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
-                    if (createThumbnail($path, $thumbDestination)) {
-                        // Update the file record with the new thumbnail path
-                        $updateThumbnailStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
-                        $updateThumbnailStmt->execute([$thumbnailRelPath, $fileId]);
-                        $stats['thumbnails_created']++;
-                        echo " (Thumb ID: {$fileId})"; // Append thumb info to the line
-                        if ($debugMode) {
-                            echo " DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}";
+                // If a thumbnail already exists and the file is present, skip creation
+                if (!empty($existingThumbnailPath) && file_exists(__DIR__ . '/' . $existingThumbnailPath)) {
+                    if ($debugMode) {
+                        echo " (Thumb exists)";
+                    }
+                } else {
+                    $thumbnailRelPath = getThumbnailPath($fileId);
+                    if (!empty($thumbnailRelPath)) {
+                        $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
+                        if (createThumbnail($path, $thumbDestination)) {
+                            // Update the file record with the new thumbnail path
+                            $updateThumbnailStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
+                            $updateThumbnailStmt->execute([$thumbnailRelPath, $fileId]);
+                            $stats['thumbnails_created']++;
+                            echo " (Thumb ID: {$fileId})"; // Append thumb info to the line
+                            if ($debugMode) {
+                                echo " DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}";
+                            }
+                        } else {
+                            $stats['thumbnails_failed']++;
+                            if ($debugMode) {
+                                echo " DEBUG: Thumbnail creation failed for {$relativePath}";
+                            }
                         }
                     } else {
                         $stats['thumbnails_failed']++;
-                        if ($debugMode) {
-                            echo " DEBUG: Thumbnail creation failed for {$relativePath}";
-                        }
                     }
-                } else {
-                    $stats['thumbnails_failed']++;
                 }
             }
         }

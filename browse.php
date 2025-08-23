@@ -1,5 +1,55 @@
 <?php
 require 'header.php';
+
+// --- Exif Data Viewer ---
+$exif_file_id = filter_input(INPUT_GET, 'view_exif', FILTER_VALIDATE_INT);
+$exif_data = null;
+$exif_error = '';
+if ($exif_file_id) {
+    try {
+        $stmt = $pdo->prepare("SELECT path, exiftool_json FROM st_files WHERE id = ?");
+        $stmt->execute([$exif_file_id]);
+        $file_data = $stmt->fetch();
+
+        if ($file_data && !empty($file_data['exiftool_json'])) {
+            $json_data = json_decode($file_data['exiftool_json'], true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($json_data[0])) {
+                $exif_data = $json_data[0];
+                // Remove the source file from the data to not repeat it
+                unset($exif_data['SourceFile']);
+            } else {
+                $exif_error = 'Invalid JSON format in the database.';
+            }
+        } else {
+            $exif_error = 'No EXIF data found for this file.';
+        }
+    } catch (\PDOException $e) {
+        $exif_error = 'Error fetching EXIF data.';
+        log_error("EXIF Fetch Error: " . $e->getMessage());
+    }
+}
+
+// --- Thumbnail Viewer ---
+$thumb_file_id = filter_input(INPUT_GET, 'view_thumb', FILTER_VALIDATE_INT);
+$thumb_path = null;
+$thumb_error = '';
+if ($thumb_file_id) {
+    try {
+        $stmt = $pdo->prepare("SELECT path, thumbnail_path FROM st_files WHERE id = ?");
+        $stmt->execute([$thumb_file_id]);
+        $file_data = $stmt->fetch();
+
+        if ($file_data && !empty($file_data['thumbnail_path'])) {
+            $thumb_path = $file_data['thumbnail_path'];
+        } else {
+            $thumb_error = 'No thumbnail found for this file.';
+        }
+    } catch (\PDOException $e) {
+        $thumb_error = 'Error fetching thumbnail data.';
+        log_error("Thumbnail Fetch Error: " . $e->getMessage());
+    }
+}
+
 // Note: The formatBytes() helper function is now available from header.php
 
 // --- Parameter Handling ---
@@ -100,6 +150,32 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
 
 <a href="index.php" style="color: #a9d1ff; text-decoration: none; display: inline-block; margin-bottom: 20px;">&larr; Back to Home/Search</a>
 
+<?php if ($exif_data): ?>
+<div class="exif-viewer">
+    <h2>EXIF Data for: <?= htmlspecialchars($file_data['path']) ?></h2>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => null])) ?>" class="close-exif">Close</a>
+    <pre><?= htmlspecialchars(print_r($exif_data, true)) ?></pre>
+</div>
+<?php elseif ($exif_error): ?>
+<div class="exif-viewer error">
+    <p><?= htmlspecialchars($exif_error) ?></p>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => null])) ?>">Close</a>
+</div>
+<?php endif; ?>
+
+<?php if ($thumb_path): ?>
+<div class="thumbnail-viewer">
+    <h2>Thumbnail for: <?= htmlspecialchars($file_data['path']) ?></h2>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>" class="close-thumb">Close</a>
+    <img src="<?= htmlspecialchars($thumb_path) ?>" alt="Thumbnail for <?= htmlspecialchars($file_data['path']) ?>">
+</div>
+<?php elseif ($thumb_error): ?>
+<div class="thumbnail-viewer error">
+    <p><?= htmlspecialchars($thumb_error) ?></p>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>">Close</a>
+</div>
+<?php endif; ?>
+
         <?php if ($error_message): ?>
             <p class="error"><?= htmlspecialchars($error_message) ?></p>
         <?php elseif (empty($files)): ?>
@@ -118,18 +194,20 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
                         <th>Codec</th>
                         <th>Resolution</th>
                         <th>MD5 Hash</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($files as $file): ?>
+                    <?php foreach ($files as $file):
+                        ?>
                         <tr>
                             <td><span class="icon"><?= $file['is_directory'] ? '&#128193;' : '&#128441;' ?></span></td>
                             <td>
-                                <?php if ($file['is_directory']): ?>
-                                    <a href="browse.php?drive_id=<?= $drive_id ?>&path=<?= urlencode($file['path']) ?>"><?= htmlspecialchars($file['filename']) ?></a>
-                                <?php else: ?>
-                                    <?= htmlspecialchars($file['filename']) ?>
-                                <?php endif; ?>
+                                <?php if ($file['is_directory']):
+                                    ?><a href="browse.php?drive_id=<?= $drive_id ?>&path=<?= urlencode($file['path']) ?>"><?= htmlspecialchars($file['filename']) ?></a><?php
+                                else:
+                                    ?><?= htmlspecialchars($file['filename']) ?><?php
+                                endif; ?>
                             </td>
                             <td><?= htmlspecialchars($file['file_category'] ?? '—') ?></td>
                             <td><?= $file['is_directory'] ? '—' : formatBytes($file['size']) ?></td>
@@ -139,11 +217,19 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
                             <td><?= htmlspecialchars($file['media_codec'] ?? '—') ?></td>
                             <td><?= htmlspecialchars($file['media_resolution'] ?? '—') ?></td>
                             <td>
-                                <?php if (!empty($file['md5_hash'])): ?>
-                                    <a href="files.php?filename=<?= htmlspecialchars($file['md5_hash']) ?>" title="Find all files with this hash"><?= htmlspecialchars($file['md5_hash']) ?></a>
-                                <?php else: ?>
-                                    —
-                                <?php endif; ?>
+                                <?php if (!empty($file['md5_hash'])):
+                                    ?><a href="files.php?filename=<?= htmlspecialchars($file['md5_hash']) ?>" title="Find all files with this hash"><?= htmlspecialchars($file['md5_hash']) ?></a><?php
+                                else:
+                                    ?>—<?php
+                                endif; ?>
+                            </td>
+                            <td class="actions-cell">
+                                <?php if (!$file['is_directory'] && !empty($file['exiftool_json'])):
+                                    ?><a href="?<?= http_build_query(array_merge($_GET, ['view_exif' => $file['id']])) ?>" class="action-btn">Exif</a><?php
+                                endif; ?>
+                                <?php if (!$file['is_directory'] && !empty($file['thumbnail_path'])):
+                                    ?><a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => $file['id']])) ?>" class="action-btn">Thumb</a><?php
+                                endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
