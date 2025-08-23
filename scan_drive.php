@@ -859,19 +859,20 @@ echo "Step 1: Beginning filesystem scan...\n";
         "exif_camera_model = VALUES(exif_camera_model)", "file_category = VALUES(file_category)",
         "is_directory = VALUES(is_directory)", "partition_number = VALUES(partition_number)",
         "product_name = VALUES(product_name)", "product_version = VALUES(product_version)",
-        "exiftool_json = VALUES(exiftool_json)", "thumbnail_path = VALUES(thumbnail_path)"
+        "exiftool_json = VALUES(exiftool_json)", "thumbnail_path = VALUES(thumbnail_path)",
+        "filetype = VALUES(filetype)"
     ];
     $insert_cols_array = [
         "drive_id", "path", "path_hash", "filename", "size", "ctime", "mtime",
         "file_category", "media_format", "media_codec", "media_resolution",
         "media_duration", "exif_date_taken", "exif_camera_model", "is_directory",
-        "partition_number", "product_name", "product_version", "exiftool_json", "thumbnail_path", "date_added", "date_deleted", "last_scan_id"
+        "partition_number", "product_name", "product_version", "exiftool_json", "thumbnail_path", "filetype", "date_added", "date_deleted", "last_scan_id"
     ];
     $insert_vals_array = [
         ":drive_id", ":path", ":path_hash", ":filename", ":size", ":ctime", ":mtime",
         ":file_category", ":media_format", ":media_codec", ":media_resolution",
         ":media_duration", ":exif_date_taken", ":exif_camera_model", ":is_directory",
-        ":partition_number", ":product_name", ":product_version", ":exiftool_json", ":thumbnail_path", "NOW()", "NULL", ":last_scan_id"
+        ":partition_number", ":product_name", ":product_version", ":exiftool_json", ":thumbnail_path", ":filetype", "NOW()", "NULL", ":last_scan_id"
     ];
 
     if ($calculateMd5) {
@@ -960,6 +961,11 @@ echo "Step 1: Beginning filesystem scan...\n";
                     if (!empty($exiftoolPath)) $exiftoolJson = getExiftoolJson($path, $exiftoolPath);
                 }
 
+                $filetype = null;
+                if (!$fileInfo->isDir()) {
+                    $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path)));
+                }
+
                 $fileData = [
                     'drive_id' => $driveId, 'path' => $relativePath, 'path_hash' => hash('sha256', $relativePath),
                     'filename' => $fileInfo->getFilename(), 'size' => $fileInfo->isDir() ? 0 : $fileInfo->getSize(),
@@ -970,6 +976,7 @@ echo "Step 1: Beginning filesystem scan...\n";
                     'is_directory' => $fileInfo->isDir() ? 1 : 0, 'partition_number' => $partitionNumber,
                     'product_name' => $metadata['product_name'], 'product_version' => $metadata['product_version'],
                     'exiftool_json' => $exiftoolJson, 'thumbnail_path' => null, 'last_scan_id' => $scanId,
+                    'filetype' => $filetype,
                 ];
 
                 if ($calculateMd5) {
