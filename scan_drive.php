@@ -876,8 +876,9 @@ if (!$smartOnly) {
                 if ($relativePath === $lastScannedPath) {
                     $foundResumePath = true;
                     echo "  > Resumed scan, found last path. Continuing...\n";
+                } else {
+                    continue; // This skips files until the lastScannedPath is found
                 }
-                continue;
             }
 
             if ($GLOBALS['interrupted']) {
