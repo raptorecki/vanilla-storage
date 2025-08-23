@@ -211,7 +211,10 @@ try {
                                     echo !empty($drive['pair_id']) ? '<a href="?search=' . htmlspecialchars($drive['pair_name'] ?? '') . '">' . htmlspecialchars($drive['pair_name'] ?? 'ID: ' . $drive['pair_id']) . '</a>' : '—';
                                     break;
                                 case 'actions':
-                                    echo '<a href="edit_drive.php?id=' . htmlspecialchars($drive['id']) . '">Edit</a> | <a href="delete_drive.php?id=' . htmlspecialchars($drive['id']) . '">Delete</a>';
+                                    echo '<a href="edit_drive.php?id=' . htmlspecialchars($drive['id']) . '">Edit</a> | ';
+                                    echo '<a href="delete_drive.php?id=' . htmlspecialchars($drive['id']) . '">Delete Drive</a> | ';
+                                    echo '<a href="mark_files_deleted.php?id=' . htmlspecialchars($drive['id']) . '">Mark Files Deleted</a> | ';
+                                    echo '<a href="delete_drive_files.php?id=' . htmlspecialchars($drive['id']) . '">Delete All Files</a>';
                                     break;
                                 default:
                                     echo htmlspecialchars($drive[$col] ?? '—');
