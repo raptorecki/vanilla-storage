@@ -83,7 +83,7 @@ if (!$drive_id) {
 
 // Sanitize and normalize the path to prevent directory traversal attacks
 $current_path_raw = $_GET['path'] ?? '';
-$current_path = trim(preg_replace('#/+#', '/', str_replace(['\', '../'], '/', $current_path_raw)), '/');
+$current_path = trim(preg_replace('#/+#', '/', str_replace(['\\', '../'], '/', $current_path_raw)), '/');
 
 
 // --- Data Fetching ---
