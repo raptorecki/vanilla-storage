@@ -25,7 +25,13 @@ A simple PHP and MySQL-based application for tracking storage drives and their c
 
 ## Dependencies
 
-The `scan_drive.php` script relies on several external tools and PHP extensions for full functionality:
+The `scan_drive.php` script relies on several external tools and PHP extensions for full functionality.
+
+**Debian/Ubuntu Installation:**
+```bash
+sudo apt update
+sudo apt install -y ffmpeg libimage-exiftool-perl file php-exif php-gd hdparm util-linux coreutils
+```
 
 *   **`ffprobe`**: (Part of FFmpeg) Required for extracting metadata (codec, resolution, duration) from video and audio files.
 *   **`exiftool`**: Required for extracting metadata (Product Name, Product Version) from executable files and comprehensive file information.
