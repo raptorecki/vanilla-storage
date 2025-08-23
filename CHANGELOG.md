@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2025-08-24
+
+### Changed
+
+- Security hardening for `scan_drive.php`:
+    - Added root/sudo privilege check.
+    - Added mount point read/write access validation.
+    - Reverted MIME type detection to use `shell_exec('file -b ...')` as per user's requirement for exact output.
+
 ## [1.0.8] - 2025-08-23
 
 ### Added

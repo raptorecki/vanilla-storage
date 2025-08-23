@@ -41,6 +41,11 @@ if (in_array('--version', $argv)) {
     exit(0);
 }
 
+// Check for root/sudo privileges
+if (posix_getuid() !== 0) {
+    die("This script requires root or sudo privileges to run commands like hdparm and smartctl. Please run with 'sudo php " . basename(__FILE__) . "'.\n");
+}
+
 // Include necessary external files.
 // 'database.php' provides the PDO database connection ($pdo object).
 // 'helpers/error_logger.php' provides a function for logging errors.
@@ -141,6 +146,12 @@ if ($driveId <= 0) {
 }
 if (!is_dir($mountPoint)) {
     echo "Error: Mount point '{$mountPoint}' is not a valid directory.\n";
+    exit(1);
+}
+
+// Validate read/write permissions for the mount point
+if (!is_readable($mountPoint) || !is_writable($mountPoint)) {
+    echo "Error: Insufficient permissions to read from or write to mount point '{$mountPoint}'. Please ensure the script has appropriate read/write access.\n";
     exit(1);
 }
 
