@@ -913,11 +913,11 @@ if (!$smartOnly) {
             $GLOBALS['current_scanned_path'] = $relativePath;
 
             if (!$foundResumePath) {
-                if ($relativePath !== $lastScannedPath) {
-                    continue; // This skips files until the lastScannedPath is found
-                } else {
+                if ($relativePath === $lastScannedPath) {
                     $foundResumePath = true;
-                    echo "  > Resumed scan, found last path. Continuing...\n";
+                    echo "  > Resumed scan, found last path. Processing this file and continuing...\n";
+                } else {
+                    continue; // Skip files until we find the resume point
                 }
             }
 
