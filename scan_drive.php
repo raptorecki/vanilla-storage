@@ -1114,6 +1114,29 @@ Exception $e) {
 }
 
 // --- Final Statistics Calculation and Output ---
+
+// First, do a final update of the main scan stats from our in-memory counters
+// to ensure the database record is fully up-to-date before we read from it.
+$finalStatsUpdateStmt = $pdo->prepare(
+    "UPDATE st_scans SET
+        total_items_scanned = ?,
+        new_files_added = ?,
+        existing_files_updated = ?,
+        files_skipped = ?,
+        thumbnails_created = ?,
+        thumbnail_creations_failed = ?
+    WHERE scan_id = ?"
+);
+$finalStatsUpdateStmt->execute([
+    $stats['scanned'],
+    $stats['added'],
+    $stats['updated'],
+    $stats['skipped'],
+    $stats['thumbnails_created'] ?? 0,
+    $stats['thumbnails_failed'] ?? 0,
+    $scanId
+]);
+
 $finalStatsStmt = $pdo->prepare("SELECT * FROM st_scans WHERE scan_id = ?");
 $finalStatsStmt->execute([$scanId]);
 $finalStats = $finalStatsStmt->fetch();
