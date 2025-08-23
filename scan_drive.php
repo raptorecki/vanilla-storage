@@ -409,6 +409,8 @@ if (!$smartOnly) {
 
     $startTime = microtime(true);
 
+    $commitManager = new CommitManager();
+
     echo "Starting scan for drive_id: {$driveId} at '{$mountPoint}'...\n";
 
     // --- Prerequisite Check ---
@@ -619,6 +621,38 @@ if (!$smartOnly) {
     }
 
 
+    /**
+     * Manages commit frequency based on time elapsed or record count.
+     */
+    class CommitManager {
+        private $lastCommitTime;
+        private $recordCount = 0;
+        private $maxSeconds;
+        private $maxRecords;
+        
+        public function __construct($maxSeconds = 8, $maxRecords = 2000) {
+            $this->lastCommitTime = microtime(true);
+            $this->maxSeconds = $maxSeconds;
+            $this->maxRecords = $maxRecords;
+        }
+        
+        public function shouldCommit(): bool {
+            $timeElapsed = microtime(true) - $this->lastCommitTime;
+            return $timeElapsed >= $this->maxSeconds || 
+                   $this->recordCount >= $this->maxRecords;
+        }
+
+        public function recordProcessed(): void {
+            $this->recordCount++;
+        }
+
+        public function reset(): void {
+            $this->lastCommitTime = microtime(true);
+            $this->recordCount = 0;
+        }
+    }
+
+
     // --- File Type Categorization ---
     $extensionMap = [
         'mp4' => 'Video', 'mkv' => 'Video', 'mov' => 'Video', 'avi' => 'Video', 'wmv' => 'Video',
@@ -731,28 +765,26 @@ if (!$smartOnly) {
 
     // --- Main Scanning Logic ---
 
-    function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats): void {
-        global $commitInterval;
-        static $filesInTransaction = 0;
+    function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats, CommitManager $commitManager): void {
+        // The CommitManager handles the logic of when to commit.
+        // This function is now only responsible for the actual commit operation and updating scan stats.
+        echo "  > Committing progress... ({$stats['scanned']} items scanned)\n";
+        $pdo->commit();
 
-        $filesInTransaction++;
+        $updateStmt = $pdo->prepare(
+            "UPDATE st_scans SET
+                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,
+                existing_files_updated = ?, files_marked_deleted = ?, files_skipped = ?
+ WHERE scan_id = ?"
+        );
+        $updateStmt->execute([
+            $lastPath, $stats['scanned'], $stats['added'],
+            $stats['updated'],
+            $stats['deleted'], $stats['skipped'], $scanId
+        ]);
 
-        if ($filesInTransaction >= $commitInterval) {
-            echo "  > Committing progress... ({$stats['scanned']} items scanned)\n";
-            $pdo->commit();
-
-            $updateStmt = $pdo->prepare(
-                "UPDATE st_scans SET\n                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,\n                existing_files_updated = ?, files_marked_deleted = ?, files_skipped = ?\n WHERE scan_id = ?"
-            );
-            $updateStmt->execute([
-                $lastPath, $stats['scanned'], $stats['added'],
-                $stats['updated'],
-                $stats['deleted'], $stats['skipped'], $scanId
-            ]);
-
-            $filesInTransaction = 0;
-            $pdo->beginTransaction();
-        }
+        $pdo->beginTransaction();
+        $commitManager->reset(); // Reset the commit manager after a successful commit
     }
 
     function attempt_remount(string $mountPoint, string $physicalSerial, string $devicePath): bool {
@@ -891,6 +923,7 @@ if (!$smartOnly) {
             }
 
             $stats['scanned']++;
+            $commitManager->recordProcessed();
 
             if ($skipExisting) {
                 $checkStmt = $pdo->prepare("SELECT 1 FROM st_files WHERE drive_id = ? AND path_hash = ?");
@@ -1042,7 +1075,9 @@ if (!$smartOnly) {
 
             echo "\n";
 
-            commit_progress($pdo, $scanId, $relativePath, $stats);
+            if ($commitManager->shouldCommit()) {
+                commit_progress($pdo, $scanId, $relativePath, $stats, $commitManager);
+            }
         }
 
         $pdo->commit();
