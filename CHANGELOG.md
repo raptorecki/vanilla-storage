@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2025-08-23
+
+### Added
+
+- "Drives Scanned (Completed)" statistic added to `stats.php`.
+- "Drives with SMART Issues" section added to `stats.php`, displaying a list of drives with identified SMART issues.
+- "Used/Free" space bar added to `drives.php` table, showing usage percentage and "N/A" for unscanned drives.
+- Enhanced hover text for "Used/Free" bar in `drives.php` to include used and free space in GB.
+
 ## [1.0.7] - 2025-08-23
 
 ### Added

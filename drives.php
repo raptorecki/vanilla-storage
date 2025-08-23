@@ -81,7 +81,8 @@ try {
                 WHEN EXISTS (SELECT 1 FROM st_scans s WHERE s.drive_id = d1.id) THEN 'Done'
                 ELSE 'Required'
             END AS scan_status,
-            (SELECT MAX(scan_date) FROM st_scans WHERE drive_id = d1.id) AS last_scan
+            (SELECT MAX(scan_date) FROM st_scans WHERE drive_id = d1.id) AS last_scan,
+            (SELECT SUM(size) FROM st_files WHERE drive_id = d1.id AND date_deleted IS NULL) AS used_bytes
         FROM st_drives d1 
         LEFT JOIN st_drives d2 ON d1.pair_id = d2.id
     ";
@@ -171,7 +172,7 @@ try {
                 $headers = [
                     'id' => 'ID', 'an_serial' => 'AN Serial', 'name' => 'Name', 'legacy_name' => 'Legacy Name',
                     'vendor' => 'Vendor', 'model' => 'Model', 'model_number' => 'Model No.', 'size' => 'Size', 'serial' => 'Serial', 'firmware' => 'Firmware',
-                    'smart' => 'SMART', 'summary' => 'Summary', 'dead' => 'Dead', 'online' => 'Online', 'offsite' => 'Offsite',
+                    'smart' => 'SMART', 'summary' => 'Summary', 'used_free' => 'Used/Free', 'dead' => 'Dead', 'online' => 'Online', 'offsite' => 'Offsite',
                     'encrypted' => 'Encrypted', 'empty' => 'Empty', 'filesystem' => 'Filesystem', 'pair_name' => 'Paired With',
                     'scan_status' => 'Scan', 'date_added' => 'Added', 'date_updated' => 'Last Updated', 'last_scan' => 'Last Scan', 'actions' => 'Actions'
                 ];
@@ -199,6 +200,36 @@ try {
                                     break;
                                 case 'summary':
                                     echo '<span title="' . htmlspecialchars($drive['summary'] ?? '') . '">' . htmlspecialchars(mb_strimwidth($drive['summary'] ?? '—', 0, 40, "...")) . '</span>';
+                                    break;
+                                case 'used_free':
+                                    $capacity_gb = $drive['size']; // This is in GB
+                                    $capacity_bytes = $capacity_gb * 1073741824; // Convert GB to Bytes
+                                    $used_bytes = $drive['used_bytes'] ?? 0; // Default to 0 if null (no files scanned)
+
+                                    // Check if the drive has been scanned at all
+                                    if (empty($drive['last_scan'])) {
+                                        echo 'N/A'; // Drive has not been scanned yet
+                                    } elseif ($capacity_bytes > 0) {
+                                        $percentage_used = ($used_bytes / $capacity_bytes) * 100;
+                                        $percentage_rounded = round($percentage_used, 1);
+
+                                        // Calculate used and free GB
+                                        $used_gb = round($used_bytes / 1073741824, 2);
+                                        $free_gb = round(($capacity_bytes - $used_bytes) / 1073741824, 2);
+
+                                        $bar_color_class = 'green';
+                                        if ($percentage_used >= 85) {
+                                            $bar_color_class = 'red';
+                                        } elseif ($percentage_used >= 50) {
+                                            $bar_color_class = 'yellow';
+                                        }
+                                        echo '<div class="progress-bar-container" title="' . $percentage_rounded . '% Used (' . $used_gb . ' GB Used, ' . $free_gb . ' GB Free)">';
+                                        echo '<div class="progress-bar ' . $bar_color_class . '" style="width: ' . $percentage_used . '%;"></div>';
+                                        echo '<span class="progress-bar-text">' . $percentage_rounded . '%</span>';
+                                        echo '</div>';
+                                    } else {
+                                        echo 'N/A'; // Capacity is 0 or other edge case
+                                    }
                                     break;
                                 case 'dead':
                                 case 'online':

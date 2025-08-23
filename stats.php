@@ -1,5 +1,6 @@
 <?php
 require 'header.php';
+require_once 'helpers/smartctl_analyzer.php'; // Include smartctl analyzer
 
 // Initialize stats array with default values to prevent errors on display
 $stats = [
@@ -12,6 +13,8 @@ $stats = [
     'largest_files' => [],
     'drives_most_free' => [],
     'drives_least_free' => [],
+    'drives_scanned_completed' => 0, // New stat
+    'drives_with_smart_issues' => [], // New stat
 ];
 $error_message = '';
 
@@ -131,6 +134,32 @@ try {
             d.dead = 0 AND d.empty = 0 AND s.scan_date IS NULL
     ")->fetchAll();
 
+    // 7. Get count of drives with completed scans
+    $stats['drives_scanned_completed'] = $pdo->query("SELECT COUNT(DISTINCT drive_id) FROM st_scans WHERE status = 'completed'")->fetchColumn();
+
+    // 8. Get drives with SMART issues
+    $stmt = $pdo->query("
+        SELECT
+            d.id, d.name, d.an_serial, d.serial,
+            s.output AS smartctl_output
+        FROM
+            st_drives d
+        JOIN
+            st_smart s ON d.id = s.drive_id
+        WHERE
+            s.scan_date = (SELECT MAX(scan_date) FROM st_smart WHERE drive_id = d.id)
+    ");
+    $all_drives_with_smart_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($all_drives_with_smart_data as $drive) {
+        $analysis = analyzeSmartctlOutput($drive['smartctl_output']);
+        if ($analysis['status'] === 'CRITICAL' || $analysis['status'] === 'WARNING') {
+            $drive['smart_issues'] = $analysis['issues'];
+            $drive['smart_status'] = $analysis['status'];
+            $stats['drives_with_smart_issues'][] = $drive;
+        }
+    }
+
 } catch (\PDOException $e) {
     log_error("Database Error in stats.php: " . $e->getMessage());
     $error_message = "An unexpected database error occurred while fetching statistics. Please try again. Details: " . $e->getMessage();
@@ -149,6 +178,7 @@ try {
         <div class="stat-card"><h3>Total Storage Used</h3><p><?= formatBytes((int)$stats['total_used_bytes']) ?></p></div>
         <div class="stat-card"><h3>Total Number of Files</h3><p><?= number_format($stats['total_files']) ?></p></div>
         <div class="stat-card"><h3>Drives With Scan Required</h3><p><?= number_format(count($stats['drives_scan_required'])) ?></p></div>
+        <div class="stat-card"><h3>Drives Scanned (Completed)</h3><p><?= number_format($stats['drives_scanned_completed']) ?></p></div>
     </div>
 
     <h2>Files by Category</h2>
@@ -296,6 +326,47 @@ try {
                                     <td><?= htmlspecialchars($drive['an_serial']) ?></td>
                                     <td><?= htmlspecialchars($drive['serial']) ?></td>
                                     <td><?= formatBytes($drive['used_bytes']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            </details>
+        </div>
+        <div>
+            <details>
+                <summary>Drives with SMART Issues</summary>
+                <?php if (empty($stats['drives_with_smart_issues'])): ?>
+                    <p>No drives with SMART issues detected.</p>
+                <?php else: ?>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>AN Serial</th>
+                                <th>Name</th>
+                                <th>Serial</th>
+                                <th>SMART Status</th>
+                                <th>Issues</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($stats['drives_with_smart_issues'] as $drive): ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($drive['an_serial']) ?></td>
+                                    <td><a href="browse.php?drive_id=<?= htmlspecialchars($drive['id']) ?>"><?= htmlspecialchars($drive['name']) ?></a></td>
+                                    <td><?= htmlspecialchars($drive['serial']) ?></td>
+                                    <td><span class="smart-status-<?= strtolower($drive['smart_status']) ?>"><?= htmlspecialchars($drive['smart_status']) ?></span></td>
+                                    <td>
+                                        <?php if (!empty($drive['smart_issues'])): ?>
+                                            <ul>
+                                                <?php foreach ($drive['smart_issues'] as $issue): ?>
+                                                    <li><?= htmlspecialchars($issue) ?></li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        <?php else: ?>
+                                            No specific issues.
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>

@@ -203,7 +203,7 @@ body {
         }
 
         tbody td a:hover {
-            text-decoration: underline;
+            text_decoration: underline;
         }
 
         /* --- Action Button Styles --- */
@@ -456,4 +456,40 @@ body {
 .smart-status-unknown {
     color: #9E9E9E; /* Grey */
     font-weight: bold;
+}
+
+/* Progress Bar Styles */
+.progress-bar-container {
+    width: 150px; /* Fixed width for consistency */
+    background-color: #333;
+    border-radius: 5px;
+    overflow: hidden;
+    position: relative;
+    height: 20px; /* Adjust height as needed */
+    display: flex;
+    align-items: center;
+}
+
+.progress-bar {
+    height: 100%;
+    border-radius: 5px;
+    text-align: center;
+    color: white;
+    font-size: 0.8em;
+    line-height: 20px; /* Center text vertically */
+    transition: width 0.5s ease-in-out;
+}
+
+.progress-bar.green { background-color: #4CAF50; } /* Green for low usage */
+.progress-bar.yellow { background-color: #FFC107; } /* Yellow for medium usage */
+.progress-bar.red { background-color: #F44336; }   /* Red for high usage */
+
+.progress-bar-text {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    color: #e0e0e0;
+    font-weight: bold;
+    font-size: 0.8em;
+    line-height: 20px; /* Center text vertically */
 }
