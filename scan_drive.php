@@ -53,6 +53,39 @@ require_once 'database.php';
 require_once 'helpers/error_logger.php';
 require_once 'helpers.php';
 
+    /**
+     * Manages commit frequency based on time elapsed or record count.
+     */
+    class CommitManager {
+        private $lastCommitTime;
+        private $recordCount = 0;
+        private $maxSeconds;
+        private $maxRecords;
+        
+        public function __construct($maxSeconds = 8, $maxRecords = 2000) {
+            $this->lastCommitTime = microtime(true);
+            $this->maxSeconds = $maxSeconds;
+            $this->maxRecords = $maxRecords;
+        }
+        
+        public function shouldCommit(): bool {
+            $timeElapsed = microtime(true) - $this->lastCommitTime;
+            return $timeElapsed >= $this->maxSeconds || 
+                   $this->recordCount >= $this->maxRecords;
+        }
+
+        public function recordProcessed(): void {
+            $this->recordCount++;
+        }
+
+        public function reset(): void {
+            $this->lastCommitTime = microtime(true);
+            $this->recordCount = 0;
+        }
+    }
+
+
+
 
 // --- Argument Parsing ---
 $args = $argv;
@@ -621,36 +654,7 @@ if (!$smartOnly) {
     }
 
 
-    /**
-     * Manages commit frequency based on time elapsed or record count.
-     */
-    class CommitManager {
-        private $lastCommitTime;
-        private $recordCount = 0;
-        private $maxSeconds;
-        private $maxRecords;
-        
-        public function __construct($maxSeconds = 8, $maxRecords = 2000) {
-            $this->lastCommitTime = microtime(true);
-            $this->maxSeconds = $maxSeconds;
-            $this->maxRecords = $maxRecords;
-        }
-        
-        public function shouldCommit(): bool {
-            $timeElapsed = microtime(true) - $this->lastCommitTime;
-            return $timeElapsed >= $this->maxSeconds || 
-                   $this->recordCount >= $this->maxRecords;
-        }
-
-        public function recordProcessed(): void {
-            $this->recordCount++;
-        }
-
-        public function reset(): void {
-            $this->lastCommitTime = microtime(true);
-            $this->recordCount = 0;
-        }
-    }
+    
 
 
     // --- File Type Categorization ---
