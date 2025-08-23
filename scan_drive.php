@@ -289,6 +289,33 @@ try {
         echo "  > Physical device model: {$physicalModel}\n";
     }
 
+    // --- NEW: Get smartctl output ---
+    $smartctlOutput = '';
+    echo "  > Querying SMART data with smartctl...\n";
+    $smartctlCommand = "smartctl -a " . escapeshellarg($deviceForSerial);
+    $smartctlResult = shell_exec($smartctlCommand . " 2>&1"); // Capture stderr as well
+
+    // Check for the specific error message indicating a USB bridge
+    if (strpos($smartctlResult, 'Unknown USB bridge') !== false && strpos($smartctlResult, 'Please specify device type with the -d option.') !== false) {
+        echo "  > Detected USB bridge, retrying with -d sat...\n";
+        $smartctlCommand = "smartctl -a -d sat " . escapeshellarg($deviceForSerial);
+        $smartctlResult = shell_exec($smartctlCommand . " 2>&1");
+    }
+
+    if (!empty($smartctlResult)) {
+        $smartctlOutput = trim($smartctlResult);
+        echo "  > SMART data retrieved.\n";
+    } else {
+        echo "  > Could not retrieve SMART data.\n";
+    }
+    // Insert smartctl output into st_smart table
+    if (!empty($smartctlOutput)) {
+        $insertSmartStmt = $pdo->prepare("INSERT INTO st_smart (drive_id, output) VALUES (?, ?)");
+        $insertSmartStmt->execute([$driveId, $smartctlOutput]);
+        echo "  > SMART data saved to st_smart table.\n";
+    }
+    // --- END NEW ---
+
     $filesystemType = '';
     // Get filesystem type using `lsblk -no FSTYPE` for the specific device path.
     // This is more reliable than `df -T` for getting the actual filesystem type (e.g., ntfs instead of fuseblk).
@@ -363,6 +390,7 @@ try {
 
         // If there are fields to update, construct and execute the UPDATE query.
         if (!empty($updateFields)) {
+
             $updateSql = "UPDATE st_drives SET " . implode(", ", $updateFields) . " WHERE id = ?";
             $updateParams[] = $driveId;
             $updateStmt = $pdo->prepare($updateSql);
@@ -1071,8 +1099,7 @@ echo "Step 1: Beginning filesystem scan...\n";
         }
 
         // 5. Add a final newline to complete the progress indicator line
-        echo "
-";
+        echo "\n";
 
         // Periodically commit the transaction
         commit_progress($pdo, $scanId, $relativePath, $stats);

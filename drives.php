@@ -74,7 +74,7 @@ try {
     // Query to get drives and their pair's name using a self-join
     $sql = "
         SELECT 
-            d1.*, 
+            d1.*, d1.smartctl,
             d2.name as pair_name,
             CASE
                 WHEN d1.dead = 1 OR d1.empty = 1 THEN 'N/A'
@@ -214,7 +214,8 @@ try {
                                     echo '<a href="edit_drive.php?id=' . htmlspecialchars($drive['id']) . '">Edit</a> | ';
                                     echo '<a href="delete_drive.php?id=' . htmlspecialchars($drive['id']) . '">Delete Drive</a> | ';
                                     echo '<a href="mark_files_deleted.php?id=' . htmlspecialchars($drive['id']) . '">Mark Files Deleted</a> | ';
-                                    echo '<a href="delete_drive_files.php?id=' . htmlspecialchars($drive['id']) . '">Delete All Files</a>';
+                                    echo '<a href="delete_drive_files.php?id=' . htmlspecialchars($drive['id']) . '">Delete All Files</a> | ';
+                                    echo '<a href="view_smartctl.php?id=' . htmlspecialchars($drive['id']) . '">Smartctl</a>';
                                     break;
                                 default:
                                     echo htmlspecialchars($drive[$col] ?? '—');
