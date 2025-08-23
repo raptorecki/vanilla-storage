@@ -181,7 +181,8 @@ function signal_handler($signo) {
 }
 
 // Register the signal handler
-if (function_exists('pcntl_async_signals')) {
+// Check if the PCNTL extension is loaded to prevent fatal errors on systems where it's not available.
+if (extension_loaded('pcntl')) {
     pcntl_async_signals(true);
     pcntl_signal(SIGINT, 'signal_handler'); // Ctrl+C
     pcntl_signal(SIGTERM, 'signal_handler'); // Kill
@@ -514,7 +515,7 @@ if (!$smartOnly) {
 
         try {
             $date = new DateTime($dateString);
-            if ((int)$date->format('Y') < 1980) {
+            if ((int)$date->format('Y') < 1970) {
                 return null;
             }
             return $date->format('Y-m-d H:i:s');
@@ -857,6 +858,9 @@ if (!$smartOnly) {
         );
         $upsertStmt = $pdo->prepare($sql);
 
+        // Prepare statement for checking existing file data for MD5 optimization
+        $stmtCheckExisting = $pdo->prepare("SELECT md5_hash, mtime, size FROM st_files WHERE drive_id = ? AND path_hash = ?");
+
         echo "Step 2: " . ($calculateMd5 ? "Scanning filesystem (MD5 hashing may be slow)..." : "Scanning filesystem (skipping MD5 hashing).\n\n");
 
         $iterator = new RecursiveIteratorIterator(
@@ -940,7 +944,22 @@ if (!$smartOnly) {
                     ];
 
                     if ($calculateMd5) {
-                        $fileData['md5_hash'] = $fileInfo->isDir() ? null : hash_file('md5', $path);
+                        $currentMtime = $fileInfo->getMTime();
+                        $currentSize = $fileInfo->getSize();
+
+                        // Check if the file exists in the database and its mtime and size match
+                        $stmtCheckExisting->execute([$driveId, hash('sha256', $relativePath)]);
+                        $existingFileData = $stmtCheckExisting->fetch(PDO::FETCH_ASSOC);
+
+                        if ($existingFileData &&
+                            $existingFileData['mtime'] == date('Y-m-d H:i:s', $currentMtime) &&
+                            $existingFileData['size'] == $currentSize) {
+                            // File hasn't changed, use existing hash
+                            $fileData['md5_hash'] = $existingFileData['md5_hash'];
+                        } else {
+                            // File has changed or is new, calculate new hash
+                            $fileData['md5_hash'] = $fileInfo->isDir() ? null : hash_file('md5', $path);
+                        }
                     }
 
                     break;
