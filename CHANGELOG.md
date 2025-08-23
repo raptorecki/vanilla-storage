@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2025-08-23
+
+### Added
+
+- `analyzeSmartctlHistory` function in `helpers/smartctl_analyzer.php` to analyze historical `smartctl` data and report significant changes in drive state.
+- `view_smartctl.php` now displays historical `smartctl` analysis results.
+- `--smart-only` option added to `scan_drive.php` to allow saving only `smartctl` output without performing a full file scan.
+
+## [1.0.6] - 2025-08-23
+
+### Added
+
+- New `analyzeSmartctlOutput` helper function in `helpers/smartctl_analyzer.php` to parse and analyze `smartctl` output.
+- `view_smartctl.php` now displays a summarized analysis of `smartctl` data, including overall status and identified issues, before showing the raw output.
+- Added CSS styling for `smartctl` analysis results in `style.css`.
+
 ## [1.0.5] - 2025-08-23
 
 ### Added

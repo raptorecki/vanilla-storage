@@ -401,3 +401,59 @@ body {
             outline: none;
             border-color: #5a9fd4;
         }
+
+/* SMART Analysis Styles */
+.smart-analysis-container {
+    background-color: #1f1f1f;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.smart-analysis-container h2 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    border-bottom: none;
+    padding-bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.smart-analysis-container h3 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    color: #ffffff;
+}
+
+.smart-analysis-container ul {
+    list-style-type: disc;
+    padding-left: 20px;
+    margin-bottom: 0;
+}
+
+.smart-analysis-container li {
+    margin-bottom: 5px;
+    color: #c0c0c0;
+}
+
+.smart-status-ok {
+    color: #4CAF50; /* Green */
+    font-weight: bold;
+}
+
+.smart-status-warning {
+    color: #FFC107; /* Amber/Orange */
+    font-weight: bold;
+}
+
+.smart-status-critical {
+    color: #F44336; /* Red */
+    font-weight: bold;
+}
+
+.smart-status-unknown {
+    color: #9E9E9E; /* Grey */
+    font-weight: bold;
+}
