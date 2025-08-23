@@ -74,7 +74,7 @@ try {
     // Query to get drives and their pair's name using a self-join
     $sql = "
         SELECT 
-            d1.*, d1.smartctl,
+            d1.*,
             d2.name as pair_name,
             CASE
                 WHEN d1.dead = 1 OR d1.empty = 1 THEN 'N/A'
