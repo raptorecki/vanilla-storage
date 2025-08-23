@@ -765,7 +765,7 @@ if (!$smartOnly) {
 
     // --- Main Scanning Logic ---
 
-    function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats, CommitManager $commitManager): void {
+        function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats, CommitManager $commitManager): void {
         // The CommitManager handles the logic of when to commit.
         // This function is now only responsible for the actual commit operation and updating scan stats.
         echo "  > Committing progress... ({$stats['scanned']} items scanned)\n";
@@ -909,11 +909,11 @@ if (!$smartOnly) {
             $GLOBALS['current_scanned_path'] = $relativePath;
 
             if (!$foundResumePath) {
-                if ($relativePath === $lastScannedPath) {
+                if ($relativePath !== $lastScannedPath) {
+                    continue; // This skips files until the lastScannedPath is found
+                } else {
                     $foundResumePath = true;
                     echo "  > Resumed scan, found last path. Continuing...\n";
-                } else {
-                    continue; // This skips files until the lastScannedPath is found
                 }
             }
 
