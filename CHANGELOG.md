@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.17] - 2025-08-25
+
+### Fixed
+- Corrected `rowCount()` logic in `scan_drive.php` for `ON DUPLICATE KEY UPDATE` to accurately track added/updated files and ensure correct `fileId` retrieval for thumbnail generation.
+
 ## [1.0.16] - 2025-08-24
 
 ### Fixed

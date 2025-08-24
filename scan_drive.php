@@ -1031,27 +1031,28 @@ if (!$smartOnly) {
             $upsertStmt->execute($fileData);
             $rowCount = $upsertStmt->rowCount();
 
-            if ($rowCount === 1) $stats['added']++;
-            elseif ($rowCount === 2) $stats['updated']++;
+            $lastInsertId = $pdo->lastInsertId();
+
+            if ($lastInsertId > 0) { // This was an insert
+                $stats['added']++;
+                $fileId = $lastInsertId;
+            } else { // This was an update or no-op
+                if ($rowCount > 0) {
+                    $stats['updated']++;
+                }
+                // Fetch the existing file ID and thumbnail path
+                $stmt = $pdo->prepare("SELECT id, thumbnail_path FROM st_files WHERE drive_id = ? AND path_hash = ?");
+                $stmt->execute([$driveId, $fileData['path_hash']]);
+                $result = $stmt->fetch();
+                $fileId = $result ? $result['id'] : null;
+                $existingThumbnailPath = $result ? $result['thumbnail_path'] : null;
+            }
 
             echo $progressMessage;
 
             if ($generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
-                $fileId = 0;
-                $existingThumbnailPath = null;
-
-                if ($rowCount === 1) {
-                    $fileId = $pdo->lastInsertId();
-                }
-                elseif ($rowCount === 2) {
-                    $fileIdStmt = $pdo->prepare("SELECT id, thumbnail_path FROM st_files WHERE drive_id = ? AND path_hash = ?");
-                    $fileIdStmt->execute([$driveId, $fileData['path_hash']]);
-                    $existingFileData = $fileIdStmt->fetch();
-                    if ($existingFileData) {
-                        $fileId = $existingFileData['id'];
-                        $existingThumbnailPath = $existingFileData['thumbnail_path'];
-                    }
-                }
+                // $fileId and $existingThumbnailPath are already set by the new logic above
+                // No need for the internal if/elseif ($rowCount === 1) block anymore
 
                 if ($fileId) {
                     if (!empty($existingThumbnailPath) && file_exists(__DIR__ . '/' . $existingThumbnailPath)) {
