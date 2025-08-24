@@ -916,6 +916,10 @@ if (!$smartOnly) {
         foreach ($iterator as $fileInfo) {
             $path = $fileInfo->getPathname();
             $relativePath = substr($path, strlen($mountPoint));
+            // Ensure directories have a trailing slash
+            if ($fileInfo->isDir() && substr($relativePath, -1) !== '/') {
+                $relativePath .= '/';
+            }
             $GLOBALS['current_scanned_path'] = $relativePath;
 
             if (!$foundResumePath) {
