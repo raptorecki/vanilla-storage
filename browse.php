@@ -1,6 +1,10 @@
 <?php
 require 'header.php';
 
+// Load configuration
+$config = require 'config.php';
+$debug_mode = $config['debug_mode'] ?? false;
+
 // --- Exif Data Viewer ---
 $exif_file_id = filter_input(INPUT_GET, 'view_exif', FILTER_VALIDATE_INT);
 $exif_data = null;
@@ -43,8 +47,11 @@ if ($thumb_file_id) {
             $thumb_path = $file_data['thumbnail_path'];
         } else {
             $thumb_error = 'No thumbnail found for this file.';
+            if ($debug_mode) {
+                log_error("Debug: No thumbnail path found in DB for file ID: " . $thumb_file_id);
+            }
         }
-    } catch (	PDOException $e) {
+    } catch (PDOException $e) {
         $thumb_error = 'Error fetching thumbnail data.';
         log_error("Thumbnail Fetch Error: " . $e->getMessage());
     }
