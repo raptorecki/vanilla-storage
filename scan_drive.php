@@ -46,6 +46,11 @@ if (posix_getuid() !== 0) {
     die("This script requires root or sudo privileges to run commands like hdparm and smartctl. Please run with 'sudo php " . basename(__FILE__) . "'.\n");
 }
 
+// Check for PCNTL extension for signal handling
+if (!extension_loaded('pcntl')) {
+    echo "Warning: The 'pcntl' extension is not available. Graceful interruption with Ctrl+C is disabled. The scan will be marked as 'interrupted' only on completion or error, not on manual termination.\n";
+}
+
 // Include necessary external files.
 // 'database.php' provides the PDO database connection ($pdo object).
 // 'helpers/error_logger.php' provides a function for logging errors.
@@ -94,6 +99,34 @@ try {
             $this->recordCount = 0;
         }
     }
+
+// Implement a proper status line manager
+class StatusDisplay {
+    private $termWidth;
+    private $lastEtaUpdate = 0;
+    
+    public function __construct() {
+        $this->termWidth = max((int)@shell_exec('tput cols') ?: 80, 40);
+    }
+    
+    public function updateProgress(string $fileMessage, ?string $etaMessage = null): void {
+        // Clear current line
+        echo "" . str_repeat(' ', $this->termWidth) . "";
+        
+        if ($etaMessage && (time() - $this->lastEtaUpdate) >= 2) {
+            echo $etaMessage . "\n";
+            $this->lastEtaUpdate = time();
+        }
+        
+        echo substr($fileMessage, 0, $this->termWidth - 1);
+    }
+
+    public function finalMessage(string $message): void {
+        // Clear current line
+        echo "" . str_repeat(' ', $this->termWidth) . "";
+        echo $message . "\n";
+    }
+}
 
 
 
@@ -469,67 +502,50 @@ if (!$smartOnly) {
     $GLOBALS['scanId'] = $scanId; // Set global scanId for shutdown function
 
     /**
-     * Formats bytes into a human-readable string (e.g., 1.23 GB).
-     * @param int $bytes The number of bytes.
-     * @param int $precision The number of decimal places.
-     * @return string The formatted string.
+     * Calculates the Estimated Time of Arrival (ETA) for a scan.
+     * @param float $timeElapsed The time elapsed since the scan started.
+     * @param int $itemsProcessed The number of items processed so far.
+     * @param int $totalItems The total number of items to process.
+     * @return float The estimated time remaining in seconds, or -1 if calculation is not possible.
      */
-    function formatBytes(int $bytes, int $precision = 2): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1 << (10 * $pow));
-        return round($bytes, $precision) . ' ' . $units[$pow];
-    }
-
-    /**
-     * Formats a duration in seconds into a human-readable string (e.g., "1h 15m 30s").
-     * @param int $seconds The duration in seconds.
-     * @return string The formatted string.
-     */
-    function formatDuration(int $seconds): string
-    {
-        if ($seconds < 0) {
-            return "--:--:--";
+    function calculateETA(float $timeElapsed, int $itemsProcessed, int $totalItems): float {
+        if ($itemsProcessed <= 0 || $totalItems <= 0 || $itemsProcessed >= $totalItems) {
+            return -1;
         }
-
-        $h = floor($seconds / 3600);
-        $m = floor(($seconds % 3600) / 60);
-        $s = $seconds % 60;
-
-        return sprintf("%02dh %02dm %02ds", $h, $m, $s);
+        
+        // Add minimum time threshold to avoid unrealistic ETAs
+        if ($timeElapsed < 10) {
+            return -1; // Wait at least 10 seconds before showing ETA
+        }
+        
+        $progress = min($itemsProcessed / $totalItems, 1.0);
+        return ($timeElapsed / $progress) - $timeElapsed;
     }
 
     // --- ETA Discovery Phase (Pass 1) ---
     if (!$bypassEta && ($stats['estimated_total_items'] === 0 || $stats['estimated_total_size'] === 0)) {
-        echo "\nStep 1: Performing ETA discovery pass...\n";
-        $totalItems = 0;
-        $totalSize = 0;
-        $discoveryIterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($mountPoint, FilesystemIterator::SKIP_DOTS | FilesystemIterator::UNIX_PATHS),
-            RecursiveIteratorIterator::SELF_FIRST
-        );
+        echo "\nStep 1: Performing ETA discovery pass using efficient shell commands...\n";
 
-        foreach ($discoveryIterator as $fileInfo) {
-            if ($GLOBALS['interrupted']) {
-                echo "\nInterruption detected during ETA discovery. Exiting.\n";
-                exit(0);
-            }
-            $totalItems++;
-            if ($fileInfo->isFile()) {
-                $totalSize += $fileInfo->getSize();
-            }
+        // Use 'find' to count total items (files + directories)
+        $itemCountCommand = "find " . escapeshellarg($mountPoint) . " | wc -l";
+        $totalItems = (int) trim(shell_exec($itemCountCommand));
+
+        // Use 'du' to get total size in bytes
+        $sizeCommand = "du -sb " . escapeshellarg($mountPoint) . " | cut -f1";
+        $totalSize = (int) trim(shell_exec($sizeCommand));
+
+        if ($totalItems > 0) {
+            $stats['estimated_total_items'] = $totalItems;
+            $stats['estimated_total_size'] = $totalSize;
+
+            $updateEtaStmt = $pdo->prepare(
+                "UPDATE st_scans SET estimated_total_items = ?, estimated_total_size = ? WHERE scan_id = ?"
+            );
+            $updateEtaStmt->execute([$totalItems, $totalSize, $scanId]);
+            echo "  > ETA discovery complete: {$totalItems} items, " . formatBytes($totalSize) . " total size.\n";
+        } else {
+            echo "  > ETA discovery failed or directory is empty. Continuing without ETA.\n";
         }
-
-        $stats['estimated_total_items'] = $totalItems;
-        $stats['estimated_total_size'] = $totalSize;
-
-        $updateEtaStmt = $pdo->prepare(
-            "UPDATE st_scans SET estimated_total_items = ?, estimated_total_size = ? WHERE scan_id = ?"
-        );
-        $updateEtaStmt->execute([$totalItems, $totalSize, $scanId]);
-        echo "  > ETA discovery complete: {$totalItems} items, " . formatBytes($totalSize) . " total size.\n";
     } else if ($bypassEta) {
         echo "\nETA discovery pass bypassed (--bypass-eta flag set).\n";
     } else {
@@ -1027,11 +1043,8 @@ if (!$smartOnly) {
             RecursiveIteratorIterator::SELF_FIRST
         );
 
-        $termWidth = (int) @shell_exec('tput cols') ?: 80;
+        $statusDisplay = new StatusDisplay();
         $foundResumePath = ($lastScannedPath === null);
-
-        $lastEtaUpdateTime = microtime(true);
-        $etaDisplayInterval = 1; // Update ETA every 1 second
 
         foreach ($iterator as $fileInfo) {
             $path = $fileInfo->getPathname();
@@ -1060,23 +1073,29 @@ if (!$smartOnly) {
                 $stats['bytes_processed'] += $fileInfo->getSize();
             }
 
-            // Issue 2: Incomplete ETA Implementation - Add ETA calculation and display
-            if (!$bypassEta && $stats['estimated_total_items'] > 0 && (microtime(true) - $lastEtaUpdateTime > $etaDisplayInterval)) {
-                $timeElapsed = microtime(true) - $startTime;
-                $progress = ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) : 0;
-                $timeRemainingSeconds = ($progress > 0) ? (($timeElapsed / $progress) - $timeElapsed) : -1;
-
+            $etaMessage = null;
+            if ($bypassEta) {
+                // If ETA is bypassed, show a simpler progress message
                 $etaMessage = sprintf(
-                    "Processed: %s / %s (%.2f%%) | ETA: %s",
+                    "Processed: %s items | Size: %s",
                     number_format($stats['scanned']),
-                    number_format($stats['estimated_total_items']),
-                    ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) * 100 : 0,
-                    formatDuration($timeRemainingSeconds)
+                    formatBytes($stats['bytes_processed'])
                 );
-
-                // Clear the line and print the ETA message
-                echo "\r" . str_pad($etaMessage, $termWidth, ' ') . "\n";
-                $lastEtaUpdateTime = microtime(true);
+            } else {
+                if ($stats['estimated_total_items'] > 0) {
+                    $timeElapsed = microtime(true) - $startTime;
+                    $timeRemainingSeconds = calculateETA($timeElapsed, $stats['scanned'], $stats['estimated_total_items']);
+                    if ($timeRemainingSeconds > 0) {
+                        $etaMessage = sprintf(
+                            "Processed: %s / %s (%.2f%%) | Size: %s | ETA: %s",
+                            number_format($stats['scanned']),
+                            number_format($stats['estimated_total_items']),
+                            ($stats['scanned'] / $stats['estimated_total_items']) * 100,
+                            formatBytes($stats['bytes_processed']),
+                            formatDuration($timeRemainingSeconds)
+                        );
+                    }
+                }
             }
 
             if ($skipExisting) {
@@ -1093,9 +1112,6 @@ if (!$smartOnly) {
             for ($retry = 0; $retry < $maxRetries; $retry++) {
                 try {
                     $progressMessage = sprintf("[%' 9d] %s", $stats['scanned'], $relativePath);
-                    if (mb_strlen($progressMessage) > $termWidth) {
-                        $progressMessage = mb_substr($progressMessage, 0, $termWidth - 4) . '...';
-                    }
 
                     $extension = strtolower($fileInfo->getExtension());
                     $category = $extensionMap[$extension] ?? 'Other';
@@ -1168,7 +1184,7 @@ if (!$smartOnly) {
             }
 
             if ($fileData === null) {
-                echo "Error: Could not process file {$relativePath} after retries. Skipping.\n";
+                echo "Error: Could not process file {" . $relativePath . "} after retries. Skipping.\n";
                 continue;
             }
 
@@ -1178,9 +1194,7 @@ if (!$smartOnly) {
             if ($rowCount === 1) $stats['added']++;
             elseif ($rowCount === 2) $stats['updated']++;
 
-            // Issue 2: ETA Display Logic Issues - Clear the ETA line before printing the file progress message
-            echo "\r" . str_pad('', $termWidth, ' ') . "\r";
-            echo $progressMessage;
+            $statusDisplay->updateProgress($progressMessage, $etaMessage);
 
             if ($generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
                 $fileId = 0;
@@ -1202,7 +1216,7 @@ if (!$smartOnly) {
                 if ($fileId) {
                     if (!empty($existingThumbnailPath) && file_exists(__DIR__ . '/' . $existingThumbnailPath)) {
                         if ($debugMode) {
-                            echo " (Thumb exists)";
+                            // echo " (Thumb exists)";
                         }
                     } else {
                         $thumbnailRelPath = getThumbnailPath($fileId);
@@ -1212,14 +1226,14 @@ if (!$smartOnly) {
                                 $updateThumbnailStmt = $pdo->prepare("UPDATE st_files SET thumbnail_path = ? WHERE id = ?");
                                 $updateThumbnailStmt->execute([$thumbnailRelPath, $fileId]);
                                 $stats['thumbnails_created']++;
-                                echo " (Thumb ID: {$fileId})";
+                                // echo " (Thumb ID: {" . $fileId . "})";
                                 if ($debugMode) {
-                                    echo " DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}";
+                                    // echo " DEBUG: Thumbnail created for {" . $relativePath . "} with ID {" . $fileId . "}";
                                 }
                             } else {
                                 $stats['thumbnails_failed']++;
                                 if ($debugMode) {
-                                    echo " DEBUG: Thumbnail creation failed for {$relativePath}";
+                                    // echo " DEBUG: Thumbnail creation failed for {" . $relativePath . "}";
                                 }
                             }
                         } else {
@@ -1229,8 +1243,6 @@ if (!$smartOnly) {
                 }
             }
 
-            echo "\n";
-
             if ($commitManager->shouldCommit()) {
                 commit_progress($pdo, $scanId, $relativePath, $stats, $commitManager, $hasBytesProcessed);
             }
@@ -1239,8 +1251,7 @@ if (!$smartOnly) {
         // Final update of ETA related stats after the loop finishes
         if (!$bypassEta && $stats['estimated_total_items'] > 0) {
             $timeElapsed = microtime(true) - $startTime;
-            $progress = ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) : 0;
-            $timeRemainingSeconds = ($progress > 0) ? (($timeElapsed / $progress) - $timeElapsed) : 0;
+            $timeRemainingSeconds = calculateETA($timeElapsed, $stats['scanned'], $stats['estimated_total_items']);
 
             $etaMessage = sprintf(
                 "Processed: %s / %s (%.2f%%) | ETA: %s",
@@ -1249,7 +1260,8 @@ if (!$smartOnly) {
                 ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) * 100 : 0,
                 formatDuration($timeRemainingSeconds)
             );
-            echo "\r" . str_pad($etaMessage, $termWidth, ' ') . "\n"; // Print final ETA and new line
+            
+            $statusDisplay->finalMessage($etaMessage);
         }
 
         $pdo->commit();
@@ -1279,7 +1291,7 @@ if (!$smartOnly) {
         );
         $markDeletedStmt->execute([$driveId, $scanId]);
         $deletedCount = $markDeletedStmt->rowCount();
-        echo "  > Marked {$deletedCount} files as deleted.\n";
+        echo "  > Marked {" . $deletedCount . "} files as deleted.\n";
 
         $updateDeletedStmt = $pdo->prepare("UPDATE st_scans SET files_marked_deleted = ? WHERE scan_id = ?");
         $updateDeletedStmt->execute([$deletedCount, $scanId]);
