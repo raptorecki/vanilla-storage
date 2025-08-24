@@ -29,7 +29,7 @@
 
 // --- Basic CLI Sanity Checks ---
 // Ensure the script is being run from the command line interface (CLI).
-// If not, terminate execution with an error message.
+// If not, terminate execution with an. error message.
 if (php_sapi_name() !== 'cli') {
     die("This script can only be run from the command line.");
 }
@@ -53,9 +53,20 @@ require_once 'database.php';
 require_once 'helpers/error_logger.php';
 require_once 'helpers.php';
 
+// Check if 'bytes_processed' column exists in 'st_scans' table
+$hasBytesProcessed = false;
+try {
+    $columns = $pdo->query("DESCRIBE st_scans")->fetchAll(PDO::FETCH_COLUMN);
+    $hasBytesProcessed = in_array('bytes_processed', $columns);
+} catch (PDOException $e) {
+    log_error("Error checking for 'bytes_processed' column: " . $e->getMessage());
+    echo "Warning: Could not verify 'bytes_processed' column in st_scans table. Proceeding without it.\n";
+}
+
     /**
      * Manages commit frequency based on time elapsed or record count.
      */
+
     class CommitManager {
         private $lastCommitTime;
         private $recordCount = 0;
@@ -103,24 +114,25 @@ $resumeScan = false;
 $skipExisting = false;
 $debugMode = false; // New debug flag
 $smartOnly = false; // New flag for smartctl only scan
-
+$bypassEta = false; // Initialize bypass ETA flag
 // Create a mapping for flags to their variables.
 $flagMap = [
-    '--no-md5' => &$calculateMd5,
-    '--no-drive-info-update' => &$updateDriveInfo,
-    '--no-thumbnails' => &$generateThumbnails,
-    '--use-external-thumb-gen' => &$useExternalThumbGen,
-    '--resume' => &$resumeScan,
-    '--skip-existing' => &$skipExisting,
-    '--debug' => &$debugMode, // New debug flag
-    '--smart-only' => &$smartOnly, // New smartctl only flag
+    '--no-md5' => & $calculateMd5,
+    '--no-drive-info-update' => & $updateDriveInfo,
+    '--no-thumbnails' => & $generateThumbnails,
+    '--use-external-thumb-gen' => & $useExternalThumbGen,
+    '--resume' => & $resumeScan,
+    '--skip-existing' => & $skipExisting,
+    '--debug' => & $debugMode, // New debug flag
+    '--smart-only' => & $smartOnly, // New smartctl only flag
+    '--bypass-eta' => & $bypassEta, // New bypass ETA flag
 ];
 
 // Process flags.
-foreach ($flagMap as $flag => &$variable) {
+foreach ($flagMap as $flag => & $variable) {
     if (($key = array_search($flag, $args)) !== false) {
-        // For --resume, --skip-existing, --debug, --smart-only set to true if present
-        if (in_array($flag, ['--resume', '--skip-existing', '--debug', '--smart-only'])) {
+        // For --resume, --skip-existing, --debug, --smart-only, --bypass-eta set to true if present
+        if (in_array($flag, ['--resume', '--skip-existing', '--debug', '--smart-only', '--bypass-eta'])) {
             $variable = true;
         } else { // For --no-* flags, set to false if present
             $variable = false;
@@ -148,8 +160,10 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
     "  --debug                 Enable verbose debug output.\n" .
     "  --smart-only            Only retrieve and save smartctl data, skipping file scanning.\n" .
+    "  --bypass-eta            Bypass the initial ETA calculation pass.\n" .
     "  --help                  Display this help message.\n" .
     "  --version               Display the application version.\n";
+
 
 // Check for --help flag first
 if (in_array('--help', $argv)) {
@@ -194,6 +208,7 @@ $lastScannedPath = null;
 $stats = [
     'scanned' => 0, 'added' => 0, 'updated' => 0, 'deleted' => 0, 'skipped' => 0,
     'thumbnails_created' => 0, 'thumbnails_failed' => 0,
+    'estimated_total_items' => 0, 'estimated_total_size' => 0, 'bytes_processed' => 0,
 ];
 
 // Global flag to indicate if the script has been interrupted
@@ -418,10 +433,23 @@ if (!$smartOnly) {
             $stats['skipped'] = $lastScan['files_skipped'];
             $stats['thumbnails_created'] = $lastScan['thumbnails_created'];
             $stats['thumbnails_failed'] = $lastScan['thumbnail_creations_failed'];
+            $stats['estimated_total_items'] = $lastScan['estimated_total_items'] ?? 0;
+            $stats['estimated_total_size'] = $lastScan['estimated_total_size'] ?? 0;
+            $stats['bytes_processed'] = $lastScan['bytes_processed'] ?? 0;
 
             echo "  > Resuming scan_id: {$scanId}\n";
             echo "  > Starting from path: " . ($lastScannedPath ?: 'beginning') . "\n";
             
+            // Issue 4: Robust Resume Logic - Add validation for resume point
+            $fullResumePath = $mountPoint . $lastScannedPath;
+            if (!file_exists($fullResumePath)) {
+                echo "Warning: Resume path '{$fullResumePath}' no longer exists. Starting from beginning.\n";
+                $foundResumePath = true; // Force start from beginning
+                $lastScannedPath = null; // Clear last scanned path
+            } else {
+                $foundResumePath = false; // Still need to find the resume point in the iterator
+            }
+
             $updateStatusStmt = $pdo->prepare("UPDATE st_scans SET status = 'running' WHERE scan_id = ?");
             $updateStatusStmt->execute([$scanId]);
         } else {
@@ -439,6 +467,74 @@ if (!$smartOnly) {
         echo "Starting new scan (scan_id: {$scanId}) for drive_id: {$driveId} at '{$mountPoint}'...\n";
     }
     $GLOBALS['scanId'] = $scanId; // Set global scanId for shutdown function
+
+    /**
+     * Formats bytes into a human-readable string (e.g., 1.23 GB).
+     * @param int $bytes The number of bytes.
+     * @param int $precision The number of decimal places.
+     * @return string The formatted string.
+     */
+    function formatBytes(int $bytes, int $precision = 2): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+        $bytes /= (1 << (10 * $pow));
+        return round($bytes, $precision) . ' ' . $units[$pow];
+    }
+
+    /**
+     * Formats a duration in seconds into a human-readable string (e.g., "1h 15m 30s").
+     * @param int $seconds The duration in seconds.
+     * @return string The formatted string.
+     */
+    function formatDuration(int $seconds): string
+    {
+        if ($seconds < 0) {
+            return "--:--:--";
+        }
+
+        $h = floor($seconds / 3600);
+        $m = floor(($seconds % 3600) / 60);
+        $s = $seconds % 60;
+
+        return sprintf("%02dh %02dm %02ds", $h, $m, $s);
+    }
+
+    // --- ETA Discovery Phase (Pass 1) ---
+    if (!$bypassEta && ($stats['estimated_total_items'] === 0 || $stats['estimated_total_size'] === 0)) {
+        echo "\nStep 1: Performing ETA discovery pass...\n";
+        $totalItems = 0;
+        $totalSize = 0;
+        $discoveryIterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($mountPoint, FilesystemIterator::SKIP_DOTS | FilesystemIterator::UNIX_PATHS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($discoveryIterator as $fileInfo) {
+            if ($GLOBALS['interrupted']) {
+                echo "\nInterruption detected during ETA discovery. Exiting.\n";
+                exit(0);
+            }
+            $totalItems++;
+            if ($fileInfo->isFile()) {
+                $totalSize += $fileInfo->getSize();
+            }
+        }
+
+        $stats['estimated_total_items'] = $totalItems;
+        $stats['estimated_total_size'] = $totalSize;
+
+        $updateEtaStmt = $pdo->prepare(
+            "UPDATE st_scans SET estimated_total_items = ?, estimated_total_size = ? WHERE scan_id = ?"
+        );
+        $updateEtaStmt->execute([$totalItems, $totalSize, $scanId]);
+        echo "  > ETA discovery complete: {$totalItems} items, " . formatBytes($totalSize) . " total size.\n";
+    } else if ($bypassEta) {
+        echo "\nETA discovery pass bypassed (--bypass-eta flag set).\n";
+    } else {
+        echo "\nUsing existing ETA data for scan_id {$scanId}: {$stats['estimated_total_items']} items, " . formatBytes($stats['estimated_total_size']) . " total size.\n";
+    }
 
     $startTime = microtime(true);
 
@@ -769,26 +865,53 @@ if (!$smartOnly) {
 
     // --- Main Scanning Logic ---
 
-        function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats, CommitManager $commitManager): void {
-        // The CommitManager handles the logic of when to commit.
-        // This function is now only responsible for the actual commit operation and updating scan stats.
+        function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats, CommitManager $commitManager, bool $hasBytesProcessed): void {
         echo "  > Committing progress... ({$stats['scanned']} items scanned)\n";
-        $pdo->commit();
-
-        $updateStmt = $pdo->prepare(
-            "UPDATE st_scans SET
-                last_scanned_path = ?, total_items_scanned = ?, new_files_added = ?,
-                existing_files_updated = ?, files_marked_deleted = ?, files_skipped = ?
- WHERE scan_id = ?"
-        );
-        $updateStmt->execute([
-            $lastPath, $stats['scanned'], $stats['added'],
+        
+        $updateFields = [
+            "last_scanned_path = ?",
+            "total_items_scanned = ?",
+            "new_files_added = ?",
+            "existing_files_updated = ?",
+            "files_marked_deleted = ?",
+            "files_skipped = ?",
+            "thumbnails_created = ?",
+            "thumbnail_creations_failed = ?"
+        ];
+        
+        $updateParams = [
+            $lastPath,
+            $stats['scanned'],
+            $stats['added'],
             $stats['updated'],
-            $stats['deleted'], $stats['skipped'], $scanId
-        ]);
-
-        $pdo->beginTransaction();
-        $commitManager->reset(); // Reset the commit manager after a successful commit
+            $stats['deleted'],
+            $stats['skipped'],
+            $stats['thumbnails_created'] ?? 0,
+            $stats['thumbnails_failed'] ?? 0
+        ];
+        
+        if ($hasBytesProcessed) {
+            $updateFields[] = "bytes_processed = ?";
+            $updateParams[] = $stats['bytes_processed'];
+        }
+        
+        $updateParams[] = $scanId;
+        
+        try {
+            // Update scan stats first, while still in transaction
+            $updateStmt = $pdo->prepare(
+                "UPDATE st_scans SET " . implode(", ", $updateFields) . " WHERE scan_id = ?"
+            );
+            $updateStmt->execute($updateParams);
+            
+            $pdo->commit();
+            $pdo->beginTransaction();
+            $commitManager->reset();
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            $pdo->beginTransaction();
+            throw $e;
+        }
     }
 
     function attempt_remount(string $mountPoint, string $physicalSerial, string $devicePath): bool {
@@ -907,6 +1030,9 @@ if (!$smartOnly) {
         $termWidth = (int) @shell_exec('tput cols') ?: 80;
         $foundResumePath = ($lastScannedPath === null);
 
+        $lastEtaUpdateTime = microtime(true);
+        $etaDisplayInterval = 1; // Update ETA every 1 second
+
         foreach ($iterator as $fileInfo) {
             $path = $fileInfo->getPathname();
             $relativePath = substr($path, strlen($mountPoint));
@@ -921,13 +1047,37 @@ if (!$smartOnly) {
                 }
             }
 
-            if ($GLOBALS['interrupted']) {
+            // Issue 5: Signal Handling Inconsistency - Only check if PCNTL is loaded
+            if (extension_loaded('pcntl') && $GLOBALS['interrupted']) {
                 echo "\nInterruption detected. Exiting scan loop gracefully.\n";
                 exit(0);
             }
 
             $stats['scanned']++;
             $commitManager->recordProcessed();
+
+            if ($fileInfo->isFile()) {
+                $stats['bytes_processed'] += $fileInfo->getSize();
+            }
+
+            // Issue 2: Incomplete ETA Implementation - Add ETA calculation and display
+            if (!$bypassEta && $stats['estimated_total_items'] > 0 && (microtime(true) - $lastEtaUpdateTime > $etaDisplayInterval)) {
+                $timeElapsed = microtime(true) - $startTime;
+                $progress = ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) : 0;
+                $timeRemainingSeconds = ($progress > 0) ? (($timeElapsed / $progress) - $timeElapsed) : -1;
+
+                $etaMessage = sprintf(
+                    "Processed: %s / %s (%.2f%%) | ETA: %s",
+                    number_format($stats['scanned']),
+                    number_format($stats['estimated_total_items']),
+                    ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) * 100 : 0,
+                    formatDuration($timeRemainingSeconds)
+                );
+
+                // Clear the line and print the ETA message
+                echo "\r" . str_pad($etaMessage, $termWidth, ' ') . "\n";
+                $lastEtaUpdateTime = microtime(true);
+            }
 
             if ($skipExisting) {
                 $checkStmt = $pdo->prepare("SELECT 1 FROM st_files WHERE drive_id = ? AND path_hash = ?");
@@ -1028,6 +1178,8 @@ if (!$smartOnly) {
             if ($rowCount === 1) $stats['added']++;
             elseif ($rowCount === 2) $stats['updated']++;
 
+            // Issue 2: ETA Display Logic Issues - Clear the ETA line before printing the file progress message
+            echo "\r" . str_pad('', $termWidth, ' ') . "\r";
             echo $progressMessage;
 
             if ($generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
@@ -1080,8 +1232,24 @@ if (!$smartOnly) {
             echo "\n";
 
             if ($commitManager->shouldCommit()) {
-                commit_progress($pdo, $scanId, $relativePath, $stats, $commitManager);
+                commit_progress($pdo, $scanId, $relativePath, $stats, $commitManager, $hasBytesProcessed);
             }
+        }
+
+        // Final update of ETA related stats after the loop finishes
+        if (!$bypassEta && $stats['estimated_total_items'] > 0) {
+            $timeElapsed = microtime(true) - $startTime;
+            $progress = ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) : 0;
+            $timeRemainingSeconds = ($progress > 0) ? (($timeElapsed / $progress) - $timeElapsed) : 0;
+
+            $etaMessage = sprintf(
+                "Processed: %s / %s (%.2f%%) | ETA: %s",
+                number_format($stats['scanned']),
+                number_format($stats['estimated_total_items']),
+                ($stats['estimated_total_items'] > 0) ? ($stats['scanned'] / $stats['estimated_total_items']) * 100 : 0,
+                formatDuration($timeRemainingSeconds)
+            );
+            echo "\r" . str_pad($etaMessage, $termWidth, ' ') . "\n"; // Print final ETA and new line
         }
 
         $pdo->commit();
@@ -1090,8 +1258,20 @@ if (!$smartOnly) {
         $stmt->execute([$driveId]);
 
         $duration = microtime(true) - $startTime;
-        $finalStmt = $pdo->prepare("UPDATE st_scans SET status = 'completed', scan_duration = ?, files_skipped = ? WHERE scan_id = ?");
-        $finalStmt->execute([round($duration), $stats['skipped'], $scanId]);
+        // Issue 5: Update finalStmt to include bytes_processed
+        $updateFields = ["status = 'completed'", "scan_duration = ?", "files_skipped = ?"];
+        $updateParams = [round($duration), $stats['skipped']];
+
+        if ($hasBytesProcessed) {
+            $updateFields[] = "bytes_processed = ?";
+            $updateParams[] = $stats['bytes_processed'];
+        }
+
+        $finalSql = "UPDATE st_scans SET " . implode(", ", $updateFields) . " WHERE scan_id = ?";
+        $updateParams[] = $scanId;
+
+        $finalStmt = $pdo->prepare($finalSql);
+        $finalStmt->execute($updateParams);
 
         echo "\nStep 4: Marking files not found in this scan as deleted...\n";
         $markDeletedStmt = $pdo->prepare(
@@ -1129,25 +1309,34 @@ if (!$smartOnly) {
         exit(1);
     }
 
-    $finalStatsUpdateStmt = $pdo->prepare(
-        "UPDATE st_scans SET
-            total_items_scanned = ?,
-            new_files_added = ?,
-            existing_files_updated = ?,
-            files_skipped = ?,
-            thumbnails_created = ?,
-            thumbnail_creations_failed = ?
-        WHERE scan_id = ?"
-    );
-    $finalStatsUpdateStmt->execute([
+    // Issue 5: Update finalStatsUpdateStmt to include bytes_processed
+    $updateFields = [
+        "total_items_scanned = ?",
+        "new_files_added = ?",
+        "existing_files_updated = ?",
+        "files_skipped = ?",
+        "thumbnails_created = ?",
+        "thumbnail_creations_failed = ?"
+    ];
+    $updateParams = [
         $stats['scanned'],
         $stats['added'],
         $stats['updated'],
         $stats['skipped'],
         $stats['thumbnails_created'] ?? 0,
-        $stats['thumbnails_failed'] ?? 0,
-        $scanId
-    ]);
+        $stats['thumbnails_failed'] ?? 0
+    ];
+
+    if ($hasBytesProcessed) {
+        $updateFields[] = "bytes_processed = ?";
+        $updateParams[] = $stats['bytes_processed'];
+    }
+
+    $finalStatsUpdateSql = "UPDATE st_scans SET " . implode(", ", $updateFields) . " WHERE scan_id = ?";
+    $updateParams[] = $scanId;
+
+    $finalStatsUpdateStmt = $pdo->prepare($finalStatsUpdateSql);
+    $finalStatsUpdateStmt->execute($updateParams);
 
     $finalStatsStmt = $pdo->prepare("SELECT * FROM st_scans WHERE scan_id = ?");
     $finalStatsStmt->execute([$scanId]);
