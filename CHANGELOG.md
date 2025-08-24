@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.18] - 2025-08-25
+
+### Fixed
+- Improved file browsing in `browse.php` to correctly display files regardless of whether their paths in the database include a leading slash or not, addressing inconsistencies in path storage.
+
 ## [1.0.17] - 2025-08-25
 
 ### Fixed
@@ -192,4 +197,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved project setup and error handling.
 - Updated various PHP files.
 - Added common development files and directories to `.gitignore`.
-

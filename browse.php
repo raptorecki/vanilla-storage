@@ -112,10 +112,21 @@ try {
         // Subdirectory: find paths that are one level deeper.
         // The path in the DB is stored with a leading slash (e.g., /movies/file.mkv),
         // while $current_path is 'movies'. We must prepend a slash for the LIKE to match.
-        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND path LIKE ? AND path NOT LIKE ? AND date_deleted IS NULL ORDER BY is_directory DESC, filename ASC";
-        $path_prefix = '/' . $current_path . '/';
-        $params[] = $path_prefix . '%';
-        $params[] = $path_prefix . '%/%';
+        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND date_deleted IS NULL AND (";
+        $sql .= " (path LIKE ? AND path NOT LIKE ?) OR "; // Case 1: path with leading slash
+        $sql .= " (path LIKE ? AND path NOT LIKE ?) ";    // Case 2: path without leading slash
+        $sql .= ") ORDER BY is_directory DESC, filename ASC";
+
+        $path_prefix_with_slash = '/' . $current_path . '/';
+        $path_prefix_without_slash = $current_path . '/';
+
+        // Add parameters for Case 1
+        $params[] = $path_prefix_with_slash . '%';
+        $params[] = $path_prefix_with_slash . '%/%';
+
+        // Add parameters for Case 2
+        $params[] = $path_prefix_without_slash . '%';
+        $params[] = $path_prefix_without_slash . '%/%';
     }
 
     $stmt = $pdo->prepare($sql);
