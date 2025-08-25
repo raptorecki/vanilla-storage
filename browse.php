@@ -216,6 +216,19 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
 </div>
 <?php endif; ?>
 
+<?php if ($thumb_path): ?>
+<div class="thumbnail-viewer">
+    <h2>Thumbnail for: <?= htmlspecialchars($file_data['path']) ?></h2>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>" class="close-thumb">Close</a>
+    <img src="<?= htmlspecialchars($thumb_path) ?>" alt="Thumbnail">
+</div>
+<?php elseif ($thumb_error): ?>
+<div class="thumbnail-viewer error">
+    <p><?= htmlspecialchars($thumb_error) ?></p>
+    <a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => null])) ?>">Close</a>
+</div>
+<?php endif; ?>
+
         <?php if ($error_message): ?>
             <p class="error"><?= htmlspecialchars($error_message) ?></p>
         <?php elseif (empty($files)): ?>
