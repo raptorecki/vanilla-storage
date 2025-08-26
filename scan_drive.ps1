@@ -332,24 +332,24 @@ foreach ($item in $allItems) {
     $csvRowObject = [PSCustomObject]@{ 
         partition_number  = $PartitionNumber
         path              = $relativePath
-        path_hash         = $path_hash
+        path_hash         = [string]$path_hash
         filename          = $item.Name
         size              = if ($item.PSIsContainer) { 0 } else { $item.Length }
-        md5_hash          = $md5_hash
-        media_format      = $media_format
-        media_codec       = $media_codec
-        media_resolution  = $media_resolution
+        md5_hash          = [string](if (-not $item.PSIsContainer) { (Get-FileHash -Algorithm MD5 -LiteralPath $item.FullName -ErrorAction SilentlyContinue).Hash } else { $null })
+        media_format      = [string]$media_format
+        media_codec       = [string]$media_codec
+        media_resolution  = [string]$media_resolution
         ctime             = $item.CreationTime.ToString('yyyy-MM-dd HH:mm:ss')
         mtime             = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
-        file_category     = $file_category
+        file_category     = [string]$file_category
         is_directory      = if ($item.PSIsContainer) { 1 } else { 0 }
-        media_duration    = $media_duration
-        exif_date_taken   = $exif_date_taken
-        exif_camera_model = $exif_camera_model
-        product_name      = $product_name
-        product_version   = $product_version
-        exiftool_json     = $exiftool_json
-        filetype          = $filetype
+        media_duration    = [string]$media_duration
+        exif_date_taken   = [string]$exif_date_taken
+        exif_camera_model = [string]$exif_camera_model
+        product_name      = [string]$product_name
+        product_version   = [string]$product_version
+        exiftool_json     = [string]$exiftool_json
+        filetype          = [string]$filetype
     }
 
     # Append the new row to the CSV file

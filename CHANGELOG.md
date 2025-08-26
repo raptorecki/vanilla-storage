@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2025-08-26
+
+### Fixed
+- **PowerShell Scan Script (`scan_drive.ps1`):**
+  - Ensured robust CSV output by explicitly casting all relevant fields to string, resolving `System.Object[]` display issues for `file_category`, `filetype`, and other metadata fields.
+
 ## [1.1.1] - 2025-08-26
 
 ### Fixed
@@ -227,14 +233,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SQL lock wait timeouts during scan initialization.
 - Immediate script termination on Ctrl+C.
 - Broken ASCII logo in `header.php`.
-- Redirection issue in `delete_drive.php`.
-- Display flash messages immediately after drive actions.
-- Standardized form actions and repaired `edit_drive.php` page.
-
-### Changed
-
-- Reverted to in-line thumbnail generation from asynchronous.
-- Improved scan logic and stats accuracy.
-- Improved project setup and error handling.
-- Updated various PHP files.
-- Added common development files and directories to `.gitignore`.
