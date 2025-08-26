@@ -295,20 +295,23 @@ foreach ($item in $allItems) {
         if (-not [string]::IsNullOrEmpty($exiftool_json) -and ($exiftool_json.StartsWith('[') -or $exiftool_json.StartsWith('{'))) {
             $exifData = $exiftool_json | ConvertFrom-Json
 
-            # Common fields
-            $media_format = $exifData[0].FileType
+            # Check if $exifData is not null and not empty before accessing elements
+            if ($exifData -and $exifData.Count -gt 0) {
+                # Common fields
+                $media_format = $exifData[0].FileType
 
-            # Executable Info
-            $product_name = $exifData[0].ProductName
-            $product_version = $exifData[0].ProductVersion
+                # Executable Info
+                $product_name = $exifData[0].ProductName
+                $product_version = $exifData[0].ProductName
 
-            # Image/Video Info
-            $exif_camera_model = $exifData[0].Model
-            if ($exifData[0].DateTimeOriginal) {
-                try { $exif_date_taken = [datetime]::ParseExact($exifData[0].DateTimeOriginal, 'yyyy:MM:dd HH:mm:ss', $null).ToString('yyyy-MM-dd HH:mm:ss') } catch {}
-            }
-            if ($exifData[0].ImageWidth -and $exifData[0].ImageHeight) {
-                $media_resolution = "{0}x{1}" -f $exifData[0].ImageWidth, $exifData[0].ImageHeight
+                # Image/Video Info
+                $exif_camera_model = $exifData[0].Model
+                if ($exifData[0].DateTimeOriginal) {
+                    try { $exif_date_taken = [datetime]::ParseExact($exifData[0].DateTimeOriginal, 'yyyy:MM:dd HH:mm:ss', $null).ToString('yyyy-MM-dd HH:mm:ss') } catch {}
+                }
+                if ($exifData[0].ImageWidth -and $exifData[0].ImageHeight) {
+                    $media_resolution = "{0}x{1}" -f $exifData[0].ImageWidth, $exifData[0].ImageHeight
+                }
             }
         }
 
@@ -316,11 +319,14 @@ foreach ($item in $allItems) {
             $ffprobeJson = (ffprobe -v quiet -print_format json -show_format -show_streams $item.FullName) -join "`n"
             if (-not [string]::IsNullOrEmpty($ffprobeJson) -and $ffprobeJson.StartsWith('{')) {
                 $ffprobeData = $ffprobeJson | ConvertFrom-Json
-                $stream = $ffprobeData.streams[0]
-                $media_codec = $stream.codec_name
-                $media_duration = if ($ffprobeData.format.duration) { [math]::Round([double]$ffprobeData.format.duration, 4) } else { $null }
-                if ($stream.width -and $stream.height) {
-                    $media_resolution = "{0}x{1}" -f $stream.width, $stream.height
+                # Check if $ffprobeData.streams is not null and not empty before accessing elements
+                if ($ffprobeData -and $ffprobeData.streams -and $ffprobeData.streams.Count -gt 0) {
+                    $stream = $ffprobeData.streams[0]
+                    $media_codec = $stream.codec_name
+                    $media_duration = if ($ffprobeData.format.duration) { [math]::Round([double]$ffprobeData.format.duration, 4) } else { $null }
+                    if ($stream.width -and $stream.height) {
+                        $media_resolution = "{0}x{1}" -f $stream.width, $stream.height
+                    }
                 }
             }
         }
