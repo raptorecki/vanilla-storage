@@ -302,6 +302,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <a href="files.php" class="<?= $current_page == 'files.php' ? 'active' : '' ?>">Files</a>
     <a href="scans.php" class="<?= $current_page == 'scans.php' ? 'active' : '' ?>">Scans</a>
     <a href="stats.php" class="<?= $current_page == 'stats.php' ? 'active' : '' ?>">Stats</a>
+    <a href="import_csv.php" class="<?= $current_page == 'import_csv.php' ? 'active' : '' ?>">Import</a>
 </nav>
 <div class="container">
 

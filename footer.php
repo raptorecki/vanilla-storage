@@ -8,7 +8,7 @@ $appVersion = $versionConfig['app_version'] ?? 'unknown';
 </div> <!-- closes the .container div from header.php -->
 
 <footer class="footer mt-auto py-3 bg-light">
-    <div class="container text-center">
+    <div class="container" style="text-align: center;">
         <span class="text-muted">Vanilla Storage Tracker v<?php echo htmlspecialchars($appVersion); ?></span>
     </div>
 </footer>

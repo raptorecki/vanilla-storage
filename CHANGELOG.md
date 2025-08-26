@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-08-26
+
+### Added
+- **External Scanning System:** Introduced a new system for scanning drives on external Windows machines.
+  - Created a PowerShell script (`scan_drive.ps1`) to perform comprehensive, read-only scans and generate `.csv` (file data) and `.ini` (drive metadata) files.
+  - Added a new "Import" page (`import_csv.php`) to the application for uploading these scan files.
+  - The import page features a target drive selector with a serial number mismatch check for safety.
+- **Documentation:** Added `README_EXTERNAL.md` with detailed instructions for the new external scanning feature.
+
+### Changed
+- The main navigation menu now includes a link to the "Import" page.
+- Minor UI improvements to the Import page for consistency and readability.
+- Footer version information is now centered.
+
+### Fixed
+- Resolved a PHP fatal error on the Import page related to `isset()` usage on older PHP versions.
+
 ## [1.0.21] - 2025-08-25
 
 ### Fixed
