@@ -13,36 +13,80 @@
     prevent writing the output files to the drive being scanned.
 
 .PARAMETER DriveLetter
-    The letter of the drive to scan (e.g., "D:").
+    The letter of the drive to scan (e.g., "D:"). Alias: DL
 
 .PARAMETER PartitionNumber
-    The partition number being scanned on the physical drive.
+    The partition number being scanned on the physical drive. Alias: PN
 
 .PARAMETER OutputPath
     Optional. The directory where the output files will be saved. 
     Defaults to the script's current directory.
+
+.PARAMETER Help
+    Displays this help message. Alias: H
 
 .EXAMPLE
     .\scan_drive.ps1 -DriveLetter E: -PartitionNumber 1
     (Scans E: partition 1, saves output to the current directory)
 
 .EXAMPLE
-    .\scan_drive.ps1 -DriveLetter F: -PartitionNumber 1 -OutputPath "C:\scans"
-    (Scans F: partition 1, saves output to C:\scans)
+    .\scan_drive.ps1 -DL F: -PN 1 -OutputPath "C:\scans"
+    (Scans F: partition 1 using aliases, saves output to C:\scans)
 #>
 [CmdletBinding()]
 param (
     [Parameter(Mandatory = $true)]
+    [Alias('DL')]
     [string]$DriveLetter,
 
     [Parameter(Mandatory = $true)]
+    [Alias('PN')]
     [int]$PartitionNumber,
 
     [Parameter(Mandatory = $false)]
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    [Parameter(Mandatory = $false)]
+    [Alias('H')]
+    [switch]$Help
 )
 
+function Show-Help {
+    Write-Host "
+    Vanilla Storage Drive Scanner
+
+    This script scans a drive partition and creates a .csv file with file metadata
+    and a .ini file with drive hardware information, suitable for import into the
+    Vanilla Storage application.
+
+    USAGE:
+        .\scan_drive.ps1 -DriveLetter <DRIVE> -PartitionNumber <PART_NUM> [-OutputPath <PATH>]
+
+    PARAMETERS:
+        -DriveLetter, -DL      (Required) The letter of the drive to scan (e.g., 'F:').
+        -PartitionNumber, -PN  (Required) The integer number of the partition to scan.
+        -OutputPath            (Optional) The path to save the output files.
+                               Defaults to the script's directory.
+        -Help, -H              (Optional) Displays this help message.
+
+    EXAMPLES:
+        .\scan_drive.ps1 -DriveLetter E: -PartitionNumber 1
+        .\scan_drive.ps1 -DL G: -PN 1 -OutputPath C:\scans
+    "
+}
+
+if ($Help -or ($PSBoundParameters.Count -eq 0)) {
+    Show-Help
+    exit 0
+}
+
 # --- Initial Setup and Safeguards ---
+
+# Administrator check
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Error "This script requires Administrator privileges to query hardware information. Please re-run as Administrator."
+    exit 1
+}
 
 # Ensure drive letter format is correct (e.g., "D:")
 if ($DriveLetter -notmatch '^[A-Za-z]:$') {
@@ -84,48 +128,50 @@ if (-not $toolsFound) {
     exit 1
 }
 
-# --- Drive Analysis ---
+# --- Drive Analysis (Robust Method) ---
 Write-Host "Step 1: Analyzing drive $DriveLetter..."
 
-# Find the physical drive number for the given letter
-$driveVolume = Get-WmiObject -Class Win32_Volume | Where-Object { $_.DriveLetter -eq $DriveLetter }
-if (-not $driveVolume) {
-    Write-Error "Could not find volume information for drive $DriveLetter."
+try {
+    $partition = Get-Partition -DriveLetter $DriveLetter.Trim(':') -ErrorAction Stop
+    $physicalDisk = $partition | Get-Disk -ErrorAction Stop
+    $volume = $partition | Get-Volume -ErrorAction Stop
+} catch {
+    Write-Error "Could not determine the physical disk for drive $DriveLetter. Please ensure it is a basic physical disk. Error: $_"
     exit 1
 }
 
-$drivePartitions = Get-WmiObject -Class Win32_DiskDriveToDiskPartition | Where-Object { $driveVolume.DeviceID -match [regex]::Escape($_.Dependent.DeviceID) }
-$physicalDrive = Get-WmiObject -Class Win32_DiskDrive | Where-Object { $_.DeviceID -eq $drivePartitions.Antecedent.DeviceID }
-
-if (-not $physicalDrive) {
-    Write-Error "Could not determine the physical drive for $DriveLetter."
-    exit 1
-}
-
-$driveDevicePath = $physicalDrive.DeviceID
-$driveModel = $physicalDrive.Model
-$driveFilesystem = $driveVolume.FileSystem
+$driveModel = $physicalDisk.Model
+$driveFilesystem = $volume.FileSystem
+$driveDevicePathForHDParm = "\\.\PhysicalDrive" + $physicalDisk.Number
 
 Write-Host "  > Drive Model: $driveModel"
 Write-Host "  > Filesystem: $driveFilesystem"
-Write-Host "  > Device Path: $driveDevicePath"
+Write-Host "  > Device Path: $driveDevicePathForHDParm"
 
 # Get Serial Number from hdparm
 Write-Host "  > Querying serial number with hdparm..."
-$hdparmOutput = (hdparm -I $driveDevicePath 2>&1)
+$hdparmOutput = (hdparm -I $driveDevicePathForHDParm)
 $driveSerial = ($hdparmOutput | Select-String -Pattern 'Serial Number:' | ForEach-Object { ($_.ToString() -split ':')[1].Trim() }) -join ''
 
 if ([string]::IsNullOrEmpty($driveSerial)) {
-    Write-Error "Could not retrieve drive serial number using hdparm. Cannot proceed."
+    # Fallback for NVMe drives or where hdparm fails
+    Write-Warning "hdparm failed to get serial number. Trying fallback method for NVMe/SCSI..."
+    $driveSerial = $physicalDisk.SerialNumber.Trim()
+}
+
+if ([string]::IsNullOrEmpty($driveSerial)) {
+    Write-Error "Could not retrieve drive serial number. Cannot proceed."
     exit 1
 }
+
 # Sanitize serial number for use as a filename
 $safeSerial = $driveSerial -replace '[^a-zA-Z0-9_.-]', ''
 Write-Host "  > Found Serial Number: $driveSerial (Safe Filename: $safeSerial)"
 
 # Get SMART data from smartctl
 Write-Host "  > Querying SMART data with smartctl..."
-$smartctlOutput = (smartctl -a $driveDevicePath 2>&1) -join "`n"
+# Note: smartctl can often use the drive letter directly
+$smartctlOutput = (smartctl -a $DriveLetter) -join "`n"
 
 # --- .ini File Generation ---
 Write-Host "Step 2: Generating .ini file..."
@@ -165,8 +211,8 @@ $csvHeader = @(
     'exif_camera_model', 'product_name', 'product_version', 'exiftool_json', 'filetype'
 )
 
-# Write header to CSV file
-$csvHeader | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip 1 | Out-File -FilePath $csvFilePath -Encoding utf8
+# Correctly write the header to the CSV file
+'"' + ($csvHeader -join '","' ) + '"' | Out-File -FilePath $csvFilePath -Encoding utf8
 
 # Get all file system objects
 $allItems = Get-ChildItem -Path $TargetDriveRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -176,7 +222,7 @@ $currentItem = 0
 # Start scanning
 foreach ($item in $allItems) {
     $currentItem++
-    $percentComplete = [math]::Round(($currentItem / $totalItems) * 100, 2)
+    $percentComplete = if ($totalItems -gt 0) { [math]::Round(($currentItem / $totalItems) * 100, 2) } else { 0 }
     $progressMessage = "[{0}/{1} - {2}%] Scanning: {3}" -f $currentItem, $totalItems, $percentComplete, $item.FullName
     Write-Progress -Activity "Scanning Drive" -Status $progressMessage -PercentComplete $percentComplete
 
@@ -186,22 +232,49 @@ foreach ($item in $allItems) {
         $relativePath += '\'
     }
 
-    $path_hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $item.FullName -ErrorAction SilentlyContinue).Hash
+    # Correctly generate path_hash for both files and directories
+    if ($item.PSIsContainer) {
+        $utf8bytes = [System.Text.Encoding]::UTF8.GetBytes($relativePath)
+        $hashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+        $path_hash_bytes = $hashAlgorithm.ComputeHash($utf8bytes)
+        $path_hash = [System.BitConverter]::ToString($path_hash_bytes).Replace('-', '')
+    } else {
+        $path_hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $item.FullName -ErrorAction SilentlyContinue).Hash
+    }
+
     $md5_hash = if (-not $item.PSIsContainer) { (Get-FileHash -Algorithm MD5 -LiteralPath $item.FullName -ErrorAction SilentlyContinue).Hash } else { $null }
     
-    $filetype = (fil $item.FullName 2>&1 | ForEach-Object { ($_.ToString() -split ':', 2)[1].Trim() }) -join ''
+    $filetype = $null
+    try {
+        $filetypeRaw = (fil $item.FullName) -join ' '
+        # The output is in the format 'C:\path\file.txt: description'
+        # We remove the known full path and the colon to isolate the description.
+        $filetype = $filetypeRaw.Replace($item.FullName + ':', '').Trim()
+        if ([string]::IsNullOrWhiteSpace($filetype)) {
+            $filetype = $null
+        }
+    } catch {
+        Write-Warning "Could not determine filetype for $($item.FullName)"
+    }
 
     $extension = $item.Extension.TrimStart('.').ToLower()
-    $file_category = switch ($extension) {
-        {'mp4', 'mkv', 'mov', 'avi', 'wmv', 'flv', 'webm', 'mpg', 'mpeg', 'm4v', 'ts'} { 'Video' }
-        {'mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma'} { 'Audio' }
-        {'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg', 'heic', 'raw'} { 'Image' }
-        {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'odt'} { 'Document' }
-        {'zip', 'rar', '7z', 'tar', 'gz'} { 'Archive' }
-        {'exe', 'msi', 'bat', 'sh'} { 'Executable' }
-        default { 'Other' }
+    # Robustly determine file category using an if/elseif block
+    $file_category = 'Other' # Default value
+    if ($item.PSIsContainer) {
+        $file_category = 'Directory'
+    } elseif (@('mp4', 'mkv', 'mov', 'avi', 'wmv', 'flv', 'webm', 'mpg', 'mpeg', 'm4v', 'ts') -contains $extension) {
+        $file_category = 'Video'
+    } elseif (@('mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma') -contains $extension) {
+        $file_category = 'Audio'
+    } elseif (@('jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg', 'heic', 'raw') -contains $extension) {
+        $file_category = 'Image'
+    } elseif (@('pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'odt') -contains $extension) {
+        $file_category = 'Document'
+    } elseif (@('zip', 'rar', '7z', 'tar', 'gz') -contains $extension) {
+        $file_category = 'Archive'
+    } elseif (@('exe', 'msi', 'bat', 'sh') -contains $extension) {
+        $file_category = 'Executable'
     }
-    if ($item.PSIsContainer) { $file_category = 'Directory' }
 
     # --- Advanced Metadata (Exiftool, FFprobe) ---
     $media_format = $null
@@ -216,7 +289,7 @@ foreach ($item in $allItems) {
 
     try {
         if ($file_category -in @('Video', 'Audio', 'Image', 'Executable')) {
-            $exiftool_json = (exiftool -G -s -json $item.FullName 2>&1) -join "`n"
+            $exiftool_json = (exiftool -G -s -json $item.FullName) -join "`n"
         }
 
         if (-not [string]::IsNullOrEmpty($exiftool_json) -and ($exiftool_json.StartsWith('[') -or $exiftool_json.StartsWith('{'))) {
@@ -240,7 +313,7 @@ foreach ($item in $allItems) {
         }
 
         if ($file_category -in @('Video', 'Audio')) {
-            $ffprobeJson = (ffprobe -v quiet -print_format json -show_format -show_streams $item.FullName 2>&1) -join "`n"
+            $ffprobeJson = (ffprobe -v quiet -print_format json -show_format -show_streams $item.FullName) -join "`n"
             if (-not [string]::IsNullOrEmpty($ffprobeJson) -and $ffprobeJson.StartsWith('{')) {
                 $ffprobeData = $ffprobeJson | ConvertFrom-Json
                 $stream = $ffprobeData.streams[0]
