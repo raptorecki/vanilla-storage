@@ -341,7 +341,7 @@ foreach ($item in $allItems) {
         path_hash         = [string]$path_hash
         filename          = $item.Name
         size              = if ($item.PSIsContainer) { 0 } else { $item.Length }
-        md5_hash          = [string](if (-not $item.PSIsContainer) { (Get-FileHash -Algorithm MD5 -LiteralPath $item.FullName -ErrorAction SilentlyContinue).Hash } else { $null })
+        md5_hash          = $(if (-not $item.PSIsContainer) { [string](Get-FileHash -Algorithm MD5 -LiteralPath $item.FullName -ErrorAction SilentlyContinue).Hash } else { [string]$null })
         media_format      = [string]$media_format
         media_codec       = [string]$media_codec
         media_resolution  = [string]$media_resolution
