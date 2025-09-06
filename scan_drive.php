@@ -97,7 +97,7 @@ $args = $argv;
 array_shift($args); // Remove the script name itself.
 
 // --- Configuration ---
-$commitInterval = 10; // Commit progress to the database every 10 files.
+
 
 // Initialize flags with default values.
 $calculateMd5 = true;
@@ -228,9 +228,8 @@ $GLOBALS['current_scanned_path'] = null;
 
 // Define the signal handler
 function signal_handler($signo) {
-    global $interrupted;
     if ($signo === SIGINT || $signo === SIGTERM) {
-        $interrupted = true;
+        $GLOBALS['interrupted'] = true;
     }
 }
 
@@ -243,21 +242,20 @@ if (extension_loaded('pcntl')) {
 }
 
 // Define a final shutdown function that handles cleanup
-register_shutdown_function(function() use ($scanId) {
-    global $interrupted, $pdo, $current_scanned_path; // Access $pdo and $current_scanned_path globally
+register_shutdown_function(function() {
     // Check if the script was interrupted or if there was a fatal error
     $error = error_get_last();
     $isFatalError = ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR]));
 
     // Only update scan status if a scanId was actually created (i.e., not a smart-only run)
-    if ($GLOBALS['scanId'] && ($interrupted || $isFatalError)) {
+    if (!empty($GLOBALS['scanId']) && ($GLOBALS['interrupted'] || $isFatalError)) {
         try {
             // Ensure transaction is rolled back if still active
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
+            if ($GLOBALS['pdo']->inTransaction()) {
+                $GLOBALS['pdo']->rollBack();
             }
-            $stmt = $pdo->prepare("UPDATE st_scans SET status = 'interrupted', last_scanned_path = ? WHERE scan_id = ? AND status = 'running'");
-            $stmt->execute([$current_scanned_path, $GLOBALS['scanId']]);
+            $stmt = $GLOBALS['pdo']->prepare("UPDATE st_scans SET status = 'interrupted', last_scanned_path = ? WHERE scan_id = ? AND status = 'running'");
+            $stmt->execute([$GLOBALS['current_scanned_path'], $GLOBALS['scanId']]);
             echo "\nScan interrupted. Run with --resume to continue.\n";
         } catch (PDOException $e) {
             // Log the error for debugging

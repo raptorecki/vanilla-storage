@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.8] - 2025-09-06
+
+### Fixed
+- **Scan Script (`scan_drive.php`):**
+  - Corrected a variable scope issue in the `signal_handler` to ensure interruptions are reliably detected.
+  - Refactored the shutdown handler to consistently use `GLOBALS` for accessing shared state, making it more robust.
+
+### Removed
+- **Scan Script (`scan_drive.php`):**
+  - Removed the unused `$commitInterval` variable.
+
 ## [1.1.7] - 2025-09-06
 
 ### Fixed
