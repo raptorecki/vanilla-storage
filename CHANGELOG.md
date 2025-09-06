@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2025-09-06
+
+### Fixed
+- **Scan Script (`scan_drive.php`):**
+  - Corrected an issue where using multiple command-line options at once would fail.
+  - Hardened argument parsing to enforce that options (e.g., `--no-exif`) must come before positional arguments (`drive_id`, etc.).
+  - The script will now exit with an error if an unknown option is used.
+
 ## [1.1.5] - 2025-09-06
 
 ### Changed

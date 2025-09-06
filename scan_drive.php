@@ -7,7 +7,7 @@
  * and update drive-specific information like model number, serial, and filesystem type.
  *
  * Usage:
- * php scan_drive.php [--no-md5] [--no-drive-info-update] [--no-thumbnails] [--smart-only] <drive_id> <partition_number> <mount_point>
+ * php scan_drive.php [--no-md5] [--no-drive-info-update] [--no-thumbnails] [--no-exif] [--no-filetype] [--smart-only] <drive_id> <partition_number> <mount_point>
  *
  * Arguments:
  *   <drive_id>          : The integer ID of the drive as stored in the `st_drives` table.
@@ -19,6 +19,8 @@
  *   --no-drive-info-update : Skips the automatic update of drive model, serial, and filesystem type
  *                             in the `st_drives` table.
  *   --no-thumbnails     : Skips generating thumbnails for image files.
+ *   --no-exif           : Do not use exiftool to scan files.
+ *   --no-filetype       : Do not use 'file' command to determine file type.
  *   --smart-only        : Only retrieves and saves smartctl data for the drive, skipping file scanning.
  *
  * Examples:
@@ -109,6 +111,8 @@ $resumeScan = false;
 $skipExisting = false;
 $debugMode = false; // New debug flag
 $smartOnly = false; // New flag for smartctl only scan
+$useExiftool = true;
+$useFiletype = true;
 
 // Create a mapping for flags to their variables.
 $flagMap = [
@@ -120,20 +124,38 @@ $flagMap = [
     '--skip-existing' => &$skipExisting,
     '--debug' => &$debugMode, // New debug flag
     '--smart-only' => &$smartOnly, // New smartctl only flag
+    '--no-exif' => &$useExiftool,
+    '--no-filetype' => &$useFiletype,
 ];
 
 // Process flags.
-foreach ($flagMap as $flag => &$variable) {
-    if (($key = array_search($flag, $args)) !== false) {
-        // For --resume, --skip-existing, --debug, --smart-only set to true if present
-        if (in_array($flag, ['--resume', '--skip-existing', '--debug', '--smart-only'])) {
-            $variable = true;
-        } else { // For --no-* flags, set to false if present
-            $variable = false;
+while (isset($args[0]) && strpos($args[0], '--') === 0) {
+    $arg = array_shift($args);
+
+    if (in_array($arg, ['--help', '--version'])) {
+        array_unshift($args, $arg);
+        break;
+    }
+
+    $isFlag = false;
+    foreach ($flagMap as $flag => &$variable) {
+        if ($arg === $flag) {
+            if (in_array($flag, ['--resume', '--skip-existing', '--debug', '--smart-only', '--use-external-thumb-gen'])) {
+                $variable = true;
+            } else {
+                $variable = false;
+            }
+            $isFlag = true;
+            break;
         }
-        unset($args[$key]);
+    }
+
+    if (!$isFlag) {
+        echo "Error: Unknown option '{$arg}'\n";
+        exit(1);
     }
 }
+
 
 // If external thumbnail generation is requested, disable in-line generation.
 if ($useExternalThumbGen) {
@@ -149,6 +171,8 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --no-md5                Skip MD5 hash calculation for a faster scan.\n" .
     "  --no-drive-info-update  Skip updating drive model, serial, and filesystem type.\n" .
     "  --no-thumbnails         Skip generating thumbnails for image files.\n" .
+    "  --no-exif               Do not use exiftool to scan files.\n" .
+    "  --no-filetype           Do not use 'file' command to determine file type.\n" .
     "  --use-external-thumb-gen Use external script for thumbnail generation (disables in-line).\n" .
     "  --resume                Resume an interrupted scan for the specified drive.\n" .
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
@@ -985,7 +1009,7 @@ if (!$smartOnly) {
                     }
 
                     $filetype = null;
-                    if (!$fileInfo->isDir()) {
+                    if ($useFiletype && !$fileInfo->isDir()) {
                         $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path) . ' 2>/dev/null'));
                     }
 
