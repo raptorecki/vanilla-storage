@@ -10,4 +10,8 @@ return [
     // Memory limit for the scan script. Default: 2048M
     // You can use M for megabytes, or G for gigabytes. For example: 1024M, 2G.
     'scan_memory_limit' => '2048M',
+    // Optional: Delay in microseconds between file operations (exiftool, file command, md5, thumbnail generation).
+    // This can help prevent I/O overload on slower drives or USB connections.
+    // 1000000 microseconds = 1 second. Default: 0 (no delay).
+    'safe_delay_us' => 0,
 ];

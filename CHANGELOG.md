@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.10] - 2025-09-06
+
+### Changed
+- Bumped `app_version` to 1.1.10.
+
+## [1.1.9] - 2025-09-06
+
+### Added
+- **Scan Script (`scan_drive.php`):**
+  - Introduced `--safe-delay` command-line option to add a configurable delay (in microseconds) between I/O operations (exiftool, file command, MD5 hash calculation, thumbnail generation). This helps prevent I/O overload and server crashes on slower drives or USB connections.
+  - Added `safe_delay_us` configuration option to `config.php.example` to set a default delay value.
+
 ## [1.1.8] - 2025-09-06
 
 ### Fixed

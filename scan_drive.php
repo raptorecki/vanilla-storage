@@ -22,6 +22,7 @@
  *   --no-exif           : Do not use exiftool to scan files.
  *   --no-filetype       : Do not use 'file' command to determine file type.
  *   --smart-only        : Only retrieves and saves smartctl data for the drive, skipping file scanning.
+ *   --safe-delay <microseconds> : Introduces a delay (in microseconds) between I/O operations (exiftool, file command, MD5, thumbnail generation). This can help prevent I/O overload.
  *
  * Examples:
  *   php scan_drive.php 5 1 /mnt/my_external_drive
@@ -57,6 +58,8 @@ if (isset($config['scan_memory_limit']) && !empty($config['scan_memory_limit']))
         echo "Warning: Invalid memory limit format in config. Using default.\n";
     }
 }
+
+$safeDelayUs = $config['safe_delay_us'] ?? 0;
 
     /**
      * Manages commit frequency based on time elapsed or record count.
@@ -110,6 +113,7 @@ $debugMode = false; // New debug flag
 $smartOnly = false; // New flag for smartctl only scan
 $useExiftool = true;
 $useFiletype = true;
+$safeDelayUs = 0; // Default value, will be overridden by config or CLI arg
 
 $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_number> <mount_point>\n" .
     "Options:\n" .
@@ -123,6 +127,7 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
     "  --debug                 Enable verbose debug output.\n" .
     "  --smart-only            Only retrieve and save smartctl data, skipping file scanning.\n" .
+    "  --safe-delay <microseconds> Introduce a delay between I/O operations (e.g., 100000 for 0.1 seconds).\n" .
     "  --help                  Display this help message.\n" .
     "  --version               Display the application version.\n";
 
@@ -160,6 +165,13 @@ while (isset($args[0]) && strpos($args[0], '--') === 0) {
             break;
         case '--smart-only':
             $smartOnly = true;
+            break;
+        case '--safe-delay':
+            if (!isset($args[0]) || !is_numeric($args[0])) {
+                echo "Error: --safe-delay requires a numeric value (microseconds).\n";
+                exit(1);
+            }
+            $safeDelayUs = (int)array_shift($args);
             break;
         case '--help':
             echo $usage;
@@ -986,17 +998,28 @@ if (!$smartOnly) {
                                 $metadata['product_version'] = $exiftoolData['ProductVersion'] ?? null;
                             }
                         }
+                        if ($safeDelayUs > 0) usleep($safeDelayUs);
 
                         if (!empty($ffprobePath)) {
-                            if ($category === 'Video') $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
-                            if ($category === 'Audio') $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
+                            if ($category === 'Video') {
+                                $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
+                                if ($safeDelayUs > 0) usleep($safeDelayUs);
+                            }
+                            if ($category === 'Audio') {
+                                $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
+                                if ($safeDelayUs > 0) usleep($safeDelayUs);
+                            }
                         }
-                        if ($category === 'Image') $metadata = array_merge($metadata, getImageInfo($path) ?? []);
+                        if ($category === 'Image') {
+                            $metadata = array_merge($metadata, getImageInfo($path) ?? []);
+                            if ($safeDelayUs > 0) usleep($safeDelayUs);
+                        }
                     }
 
                     $filetype = null;
                     if ($useFiletype && !$fileInfo->isDir()) {
                         $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path) . ' 2>/dev/null'));
+                        if ($safeDelayUs > 0) usleep($safeDelayUs);
                     }
 
                     $fileData = [
@@ -1028,6 +1051,7 @@ if (!$smartOnly) {
                         } else {
                             // File has changed or is new, calculate new hash
                             $fileData['md5_hash'] = $fileInfo->isDir() ? null : hash_file('md5', $path);
+                            if ($safeDelayUs > 0) usleep($safeDelayUs);
                         }
                     }
 
@@ -1103,6 +1127,7 @@ if (!$smartOnly) {
                                     echo " DEBUG: Thumbnail creation failed for {$relativePath}";
                                 }
                             }
+                            if ($safeDelayUs > 0) usleep($safeDelayUs);
                         } else {
                             $stats['thumbnails_failed']++;
                         }
