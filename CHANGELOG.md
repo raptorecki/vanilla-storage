@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Scan Script (`scan_drive.php`):**
   - Improved `ExiftoolManager` resource management to prevent leaks by ensuring proper process cleanup during script termination.
   - Enhanced error recovery in the file processing loop, introducing exponential backoff and broader detection of filesystem errors (e.g., 'Permission denied', 'Input/output error').
+  - Improved error handling and removed `@` suppressions for critical operations like `getimagesize`, `exif_read_data`, and `shell_exec` for `ffprobe` and `file` commands, ensuring better error context and preventing silent failures.
 
 ## [1.1.9] - 2025-09-06
 
