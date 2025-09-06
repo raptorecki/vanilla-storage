@@ -604,60 +604,60 @@ if (!$smartOnly) {
      * @param string $exiftoolPath The path to the exiftool executable.
      * @return string|null The full JSON output from exiftool, or null on failure.
      */
-    function getExiftoolJson(string $filePath, string $exiftoolPath): ?string
-    {
-        $command = sprintf(
-            '%s -G -s -json %s
-',
-            $exiftoolPath,
-            escapeshellarg($filePath)
-        );
-        $jsonOutput = @shell_exec($command);
+    class ExiftoolManager {
+        private $proc;
+        private $pipes;
 
-        if (empty($jsonOutput)) {
-            return null;
-        }
+        public function __construct(string $exiftoolPath) {
+            $descriptorSpec = [
+                0 => ["pipe", "r"],  // stdin
+                1 => ["pipe", "w"],  // stdout
+                2 => ["pipe", "w"]   // stderr
+            ];
 
-        $data = json_decode($jsonOutput, true);
-        if (json_last_error() === JSON_ERROR_NONE && isset($data[0])) {
-            return $jsonOutput;
-        }
+            $command = sprintf('%s -stay_open True -@ -', escapeshellarg($exiftoolPath));
 
-        return null;
-    }
+            $this->proc = proc_open($command, $descriptorSpec, $this->pipes);
 
-    /**
-     * Extracts executable metadata (Product Name, Product Version) using exiftool.
-     * @param string $filePath The full path to the executable file.
-     * @param string $exiftoolPath The path to the exiftool executable.
-     * @return array An array with 'product_name' and 'product_version' or null values.
-     */
-    function getExecutableInfo(string $filePath, string $exiftoolPath): array
-    {
-        $productName = null;
-        $productVersion = null;
-
-        $command = sprintf(
-            '%s -s3 -ProductVersion -ProductName -json %s
-',
-            $exiftoolPath,
-            escapeshellarg($filePath)
-        );
-        $jsonOutput = @shell_exec($command);
-
-        if (!empty($jsonOutput)) {
-            $data = json_decode($jsonOutput, true);
-            if (json_last_error() === JSON_ERROR_NONE && isset($data[0])) {
-                $productName = $data[0]['ProductName'] ?? null;
-                $productVersion = $data[0]['ProductVersion'] ?? null;
+            if (!is_resource($this->proc)) {
+                throw new Exception("Failed to open exiftool process.");
             }
         }
 
-        return [
-            'product_name' => $productName,
-            'product_version' => $productVersion,
-        ];
+        public function getMetadata(string $filePath): ?array {
+            fwrite($this->pipes[0], "-G\n-s\n-json\n");
+            fwrite($this->pipes[0], "$filePath\n");
+            fwrite($this->pipes[0], "-execute\n");
+
+            $output = '';
+            while (true) {
+                $line = fgets($this->pipes[1]);
+                if ($line === false || trim($line) === '{ready}') {
+                    break;
+                }
+                $output .= $line;
+            }
+
+            $data = json_decode($output, true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($data[0])) {
+                return $data[0];
+            }
+
+            return null;
+        }
+
+        public function __destruct() {
+            if (is_resource($this->proc)) {
+                fwrite($this->pipes[0], "-stay_open\nFalse\n");
+                fclose($this->pipes[0]);
+                fclose($this->pipes[1]);
+                fclose($this->pipes[2]);
+                proc_close($this->proc);
+            }
+        }
     }
+
+    
 
 
     
@@ -913,6 +913,11 @@ if (!$smartOnly) {
         $termWidth = (int) @shell_exec('tput cols') ?: 80;
         $foundResumePath = ($lastScannedPath === null);
 
+        $exiftoolManager = null;
+        if (!empty($exiftoolPath)) {
+            $exiftoolManager = new ExiftoolManager($exiftoolPath);
+        }
+
         foreach ($iterator as $fileInfo) {
             $path = $fileInfo->getPathname();
             $relativePath = substr($path, strlen($mountPoint));
@@ -963,18 +968,25 @@ if (!$smartOnly) {
                     $exiftoolJson = null;
 
                     if (!$fileInfo->isDir()) {
+                        if ($exiftoolManager) {
+                            $exiftoolData = $exiftoolManager->getMetadata($path);
+                            if ($exiftoolData) {
+                                $exiftoolJson = json_encode($exiftoolData);
+                                $metadata['product_name'] = $exiftoolData['ProductName'] ?? null;
+                                $metadata['product_version'] = $exiftoolData['ProductVersion'] ?? null;
+                            }
+                        }
+
                         if (!empty($ffprobePath)) {
                             if ($category === 'Video') $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
                             if ($category === 'Audio') $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
                         }
                         if ($category === 'Image') $metadata = array_merge($metadata, getImageInfo($path) ?? []);
-                        if (!empty($exiftoolPath) && $category === 'Executable') $metadata = array_merge($metadata, getExecutableInfo($path, $exiftoolPath));
-                        if (!empty($exiftoolPath)) $exiftoolJson = getExiftoolJson($path, $exiftoolPath);
                     }
 
                     $filetype = null;
                     if (!$fileInfo->isDir()) {
-                        $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path)));
+                        $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path) . ' 2>/dev/null'));
                     }
 
                     $fileData = [

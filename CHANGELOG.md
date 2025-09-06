@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2025-09-06
+
+### Changed
+- **Scan Script (`scan_drive.php`):**
+  - Implemented `ExiftoolManager` to use a persistent `exiftool` process (`-stay_open` flag), significantly reducing overhead when extracting metadata from a large number of files. This avoids repeatedly launching the `exiftool` executable for each file.
+
 ## [1.1.4] - 2025-08-26
 
 ### Fixed
