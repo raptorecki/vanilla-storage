@@ -529,87 +529,9 @@ if (!$smartOnly) {
         ];
     }
 
-    /**
-     * Extracts audio metadata using ffprobe.
-     * @param string $filePath The full path to the audio file.
-     * @param string $ffprobePath The path to the ffprobe executable.
-     * @return array|null An array with metadata (format, codec, duration) or null on failure.
-     */
-    function getAudioInfo(string $filePath, string $ffprobePath): ?array
-    {
-        $command = sprintf(
-            '%s -v quiet -print_format json -show_format -show_streams -select_streams a:0 %s
-',
-            $ffprobePath,
-            escapeshellarg($filePath)
-        );
-        $jsonOutput = shell_exec($command);
-        if (empty($jsonOutput)) {
-            log_error("ffprobe command failed or returned empty output for {$filePath}. Command: {$command}");
-        }
-        if (empty($jsonOutput)) return null;
-        $data = json_decode($jsonOutput, true);
-        if (json_last_error() !== JSON_ERROR_NONE || !isset($data['streams'][0])) return null;
-        $stream = $data['streams'][0];
-        $format = $data['format'] ?? [];
+    
 
-        $codec_parts = [];
-        if (isset($stream['codec_long_name'])) {
-            $codec_parts[] = $stream['codec_long_name'];
-        }
-        $bitrate = $stream['bit_rate'] ?? $format['bit_rate'] ?? null;
-        if ($bitrate) {
-            $codec_parts[] = round($bitrate / 1000) . ' kbps';
-        }
-        if (isset($stream['sample_rate'])) {
-            $codec_parts[] = ($stream['sample_rate'] / 1000) . ' kHz';
-        }
-
-        return [
-            'format' => $format['format_name'] ?? null,
-            'codec' => implode(', ', $codec_parts),
-            'resolution' => null,
-            'duration' => isset($format['duration']) ? (float)$format['duration'] : null,
-        ];
-    }
-
-    function getAudioInfo(string $filePath, string $ffprobePath): ?array
-    {
-        $command = sprintf(
-            '%s -v quiet -print_format json -show_format -show_streams -select_streams v:0 %s
-',
-            $ffprobePath,
-            escapeshellarg($filePath)
-        );
-        $jsonOutput = shell_exec($command);
-        if (empty($jsonOutput)) {
-            log_error("ffprobe command failed or returned empty output for {$filePath}. Command: {$command}");
-        }
-        if (empty($jsonOutput)) return null;
-        $data = json_decode($jsonOutput, true);
-        if (json_last_error() !== JSON_ERROR_NONE || !isset($data['streams'][0])) return null;
-        $stream = $data['streams'][0];
-        $format = $data['format'] ?? [];
-
-        $codec_parts = [];
-        if (isset($stream['codec_long_name'])) {
-            $codec_parts[] = $stream['codec_long_name'];
-        }
-        $bitrate = $stream['bit_rate'] ?? $format['bit_rate'] ?? null;
-        if ($bitrate) {
-            $codec_parts[] = round($bitrate / 1000) . ' kbps';
-        }
-        if (isset($stream['sample_rate'])) {
-            $codec_parts[] = ($stream['sample_rate'] / 1000) . ' kHz';
-        }
-
-        return [
-            'format' => $format['format_name'] ?? null,
-            'codec' => implode(', ', $codec_parts),
-            'resolution' => null,
-            'duration' => isset($format['duration']) ? (float)$format['duration'] : null,
-        ];
-    }
+    
 
     function safeGetImageSize(string $filePath): array|false {
         $imageInfo = getimagesize($filePath);
