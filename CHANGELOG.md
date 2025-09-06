@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2025-09-06
+
+### Fixed
+- **Scan Script (`scan_drive.php`):**
+  - Corrected a flaw in command-line argument parsing that caused flags like `--no-filetype` and `--no-exif` to be ignored.
+  - Hardened the script by adding validation for the `memory_limit` value in the config.
+  - Improved handling of `--help` and `--version` flags to ensure they are processed correctly.
+  - Fixed a potential notice by initializing the `$GLOBALS['current_scanned_path']` variable.
+  - Added a more explicit check for the `--no-exif` flag in the metadata extraction logic.
+  - Removed conflicting logic for the `--use-external-thumb-gen` flag to prevent unintended side effects.
+
 ## [1.1.6] - 2025-09-06
 
 ### Fixed

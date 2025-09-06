@@ -36,13 +36,6 @@ if (php_sapi_name() !== 'cli') {
     die("This script can only be run from the command line.");
 }
 
-// Check for --version flag
-if (in_array('--version', $argv)) {
-    $versionConfig = require __DIR__ . '/version.php';
-    echo basename(__FILE__) . " version " . ($versionConfig['app_version'] ?? 'unknown') . "\n";
-    exit(0);
-}
-
 // Check for root/sudo privileges
 if (posix_getuid() !== 0) {
     die("This script requires root or sudo privileges to run commands like hdparm and smartctl. Please run with 'sudo php " . basename(__FILE__) . "'.\n");
@@ -58,7 +51,11 @@ require_once 'helpers.php';
 $config = require 'config.php';
 // Set memory limit from config
 if (isset($config['scan_memory_limit']) && !empty($config['scan_memory_limit'])) {
-    ini_set('memory_limit', $config['scan_memory_limit']);
+    if (preg_match('/^-?\d+[KMG]?$/i', $config['scan_memory_limit'])) {
+        ini_set('memory_limit', $config['scan_memory_limit']);
+    } else {
+        echo "Warning: Invalid memory limit format in config. Using default.\n";
+    }
 }
 
     /**
@@ -114,58 +111,6 @@ $smartOnly = false; // New flag for smartctl only scan
 $useExiftool = true;
 $useFiletype = true;
 
-// Create a mapping for flags to their variables.
-$flagMap = [
-    '--no-md5' => &$calculateMd5,
-    '--no-drive-info-update' => &$updateDriveInfo,
-    '--no-thumbnails' => &$generateThumbnails,
-    '--use-external-thumb-gen' => &$useExternalThumbGen,
-    '--resume' => &$resumeScan,
-    '--skip-existing' => &$skipExisting,
-    '--debug' => &$debugMode, // New debug flag
-    '--smart-only' => &$smartOnly, // New smartctl only flag
-    '--no-exif' => &$useExiftool,
-    '--no-filetype' => &$useFiletype,
-];
-
-// Process flags.
-while (isset($args[0]) && strpos($args[0], '--') === 0) {
-    $arg = array_shift($args);
-
-    if (in_array($arg, ['--help', '--version'])) {
-        array_unshift($args, $arg);
-        break;
-    }
-
-    $isFlag = false;
-    foreach ($flagMap as $flag => &$variable) {
-        if ($arg === $flag) {
-            if (in_array($flag, ['--resume', '--skip-existing', '--debug', '--smart-only', '--use-external-thumb-gen'])) {
-                $variable = true;
-            } else {
-                $variable = false;
-            }
-            $isFlag = true;
-            break;
-        }
-    }
-
-    if (!$isFlag) {
-        echo "Error: Unknown option '{$arg}'\n";
-        exit(1);
-    }
-}
-
-
-// If external thumbnail generation is requested, disable in-line generation.
-if ($useExternalThumbGen) {
-    $generateThumbnails = false;
-}
-
-// Re-index the arguments array after removing flags.
-$args = array_values($args);
-
-// --- Usage and Validation ---
 $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_number> <mount_point>\n" .
     "Options:\n" .
     "  --no-md5                Skip MD5 hash calculation for a faster scan.\n" .
@@ -181,12 +126,58 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --help                  Display this help message.\n" .
     "  --version               Display the application version.\n";
 
-// Check for --help flag first
-if (in_array('--help', $argv)) {
-    echo $usage;
-    exit(0);
+// Process flags.
+while (isset($args[0]) && strpos($args[0], '--') === 0) {
+    $arg = array_shift($args);
+
+    switch ($arg) {
+        case '--no-md5':
+            $calculateMd5 = false;
+            break;
+        case '--no-drive-info-update':
+            $updateDriveInfo = false;
+            break;
+        case '--no-thumbnails':
+            $generateThumbnails = false;
+            break;
+        case '--no-exif':
+            $useExiftool = false;
+            break;
+        case '--no-filetype':
+            $useFiletype = false;
+            break;
+        case '--use-external-thumb-gen':
+            $useExternalThumbGen = true;
+            break;
+        case '--resume':
+            $resumeScan = true;
+            break;
+        case '--skip-existing':
+            $skipExisting = true;
+            break;
+        case '--debug':
+            $debugMode = true;
+            break;
+        case '--smart-only':
+            $smartOnly = true;
+            break;
+        case '--help':
+            echo $usage;
+            exit(0);
+        case '--version':
+            $versionConfig = require __DIR__ . '/version.php';
+            echo basename(__FILE__) . " version " . ($versionConfig['app_version'] ?? 'unknown') . "\n";
+            exit(0);
+        default:
+            echo "Error: Unknown option '{$arg}'\n";
+            exit(1);
+    }
 }
 
+// Re-index the arguments array after removing flags.
+$args = array_values($args);
+
+// --- Usage and Validation ---
 if (count($args) < 3) {
     echo $usage;
     exit(1);
@@ -684,9 +675,6 @@ if (!$smartOnly) {
     
 
 
-    
-
-
     // --- File Type Categorization ---
     $extensionMap = [
         'mp4' => 'Video', 'mkv' => 'Video', 'mov' => 'Video', 'avi' => 'Video', 'wmv' => 'Video',
@@ -938,7 +926,7 @@ if (!$smartOnly) {
         $foundResumePath = ($lastScannedPath === null);
 
         $exiftoolManager = null;
-        if (!empty($exiftoolPath)) {
+        if ($useExiftool && !empty($exiftoolPath)) {
             $exiftoolManager = new ExiftoolManager($exiftoolPath);
         }
 
@@ -992,7 +980,7 @@ if (!$smartOnly) {
                     $exiftoolJson = null;
 
                     if (!$fileInfo->isDir()) {
-                        if ($exiftoolManager) {
+                        if ($useExiftool && $exiftoolManager) {
                             $exiftoolData = $exiftoolManager->getMetadata($path);
                             if ($exiftoolData) {
                                 $exiftoolJson = json_encode($exiftoolData);
