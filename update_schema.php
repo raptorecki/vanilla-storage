@@ -24,6 +24,11 @@ try {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
     echo "`st_scans` table created or already exists.\n\n";
 
+    // --- Create st_scan_checkpoints table ---
+    echo "Checking for `st_scan_checkpoints` table...\n";
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `st_scan_checkpoints` (        `scan_id` INT NOT NULL,        `checkpoint_path` TEXT NOT NULL,        `file_count` INT NOT NULL DEFAULT 0,        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,        PRIMARY KEY (`scan_id`),        FOREIGN KEY (`scan_id`) REFERENCES `st_scans`(`scan_id`) ON DELETE CASCADE    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    echo "`st_scan_checkpoints` table created or already exists.\n\n";
+
     // --- Add scan_id to st_files table ---
     echo "Checking for `scan_id` column in `st_files` table...\n";
     $stmt = $pdo->query("SHOW COLUMNS FROM `st_files` LIKE 'scan_id'");
