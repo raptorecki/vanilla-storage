@@ -632,6 +632,7 @@ if (!$smartOnly) {
     class ExiftoolManager {
         private $proc;
         private $pipes;
+        private $isDestroyed = false;
 
         public function __construct(string $exiftoolPath) {
             $descriptorSpec = [
@@ -646,6 +647,15 @@ if (!$smartOnly) {
 
             if (!is_resource($this->proc)) {
                 throw new Exception("Failed to open exiftool process.");
+            }
+            
+            // Register this instance for cleanup
+            register_shutdown_function([$this, 'forceCleanup']);
+        }
+
+        public function forceCleanup() {
+            if (!$this->isDestroyed) {
+                $this->__destruct();
             }
         }
 
@@ -672,13 +682,18 @@ if (!$smartOnly) {
         }
 
         public function __destruct() {
+            if ($this->isDestroyed) return; 
+            
             if (is_resource($this->proc)) {
+                // Add timeout handling for cleanup
+                stream_set_timeout($this->pipes[0], 5);
                 fwrite($this->pipes[0], "-stay_open\nFalse\n");
                 fclose($this->pipes[0]);
                 fclose($this->pipes[1]);
                 fclose($this->pipes[2]);
                 proc_close($this->proc);
             }
+            $this->isDestroyed = true;
         }
     }
 
