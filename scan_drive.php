@@ -511,7 +511,10 @@ if (!$smartOnly) {
             $ffprobePath,
             escapeshellarg($filePath)
         );
-        $jsonOutput = @shell_exec($command);
+        $jsonOutput = shell_exec($command);
+        if (empty($jsonOutput)) {
+            log_error("ffprobe command failed or returned empty output for {$filePath}. Command: {$command}");
+        }
         if (empty($jsonOutput)) return null;
         $data = json_decode($jsonOutput, true);
         if (json_last_error() !== JSON_ERROR_NONE || !isset($data['streams'][0])) return null;
@@ -540,7 +543,10 @@ if (!$smartOnly) {
             $ffprobePath,
             escapeshellarg($filePath)
         );
-        $jsonOutput = @shell_exec($command);
+        $jsonOutput = shell_exec($command);
+        if (empty($jsonOutput)) {
+            log_error("ffprobe command failed or returned empty output for {$filePath}. Command: {$command}");
+        }
         if (empty($jsonOutput)) return null;
         $data = json_decode($jsonOutput, true);
         if (json_last_error() !== JSON_ERROR_NONE || !isset($data['streams'][0])) return null;
@@ -567,6 +573,53 @@ if (!$smartOnly) {
         ];
     }
 
+    function getAudioInfo(string $filePath, string $ffprobePath): ?array
+    {
+        $command = sprintf(
+            '%s -v quiet -print_format json -show_format -show_streams -select_streams v:0 %s
+',
+            $ffprobePath,
+            escapeshellarg($filePath)
+        );
+        $jsonOutput = shell_exec($command);
+        if (empty($jsonOutput)) {
+            log_error("ffprobe command failed or returned empty output for {$filePath}. Command: {$command}");
+        }
+        if (empty($jsonOutput)) return null;
+        $data = json_decode($jsonOutput, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !isset($data['streams'][0])) return null;
+        $stream = $data['streams'][0];
+        $format = $data['format'] ?? [];
+
+        $codec_parts = [];
+        if (isset($stream['codec_long_name'])) {
+            $codec_parts[] = $stream['codec_long_name'];
+        }
+        $bitrate = $stream['bit_rate'] ?? $format['bit_rate'] ?? null;
+        if ($bitrate) {
+            $codec_parts[] = round($bitrate / 1000) . ' kbps';
+        }
+        if (isset($stream['sample_rate'])) {
+            $codec_parts[] = ($stream['sample_rate'] / 1000) . ' kHz';
+        }
+
+        return [
+            'format' => $format['format_name'] ?? null,
+            'codec' => implode(', ', $codec_parts),
+            'resolution' => null,
+            'duration' => isset($format['duration']) ? (float)$format['duration'] : null,
+        ];
+    }
+
+    function safeGetImageSize(string $filePath): array|false {
+        $imageInfo = getimagesize($filePath);
+        if ($imageInfo === false) {
+            $error = error_get_last();
+            log_error("Failed to get image size for {$filePath}: " . ($error['message'] ?? 'Unknown error'));
+        }
+        return $imageInfo;
+    }
+
     /**
      * Parses and validates a date string from EXIF data.
      *
@@ -591,22 +644,20 @@ if (!$smartOnly) {
         }
     }
 
-    /**
-     * Extracts image metadata using native PHP functions.
-     * @param string $filePath The full path to the image file.
-     * @return array|null An array with metadata (format, resolution, exif_date_taken, exif_camera_model) or null on failure.
-     */
     function getImageInfo(string $filePath): ?array
     {
-        $imageInfo = @getimagesize($filePath);
+        $imageInfo = safeGetImageSize($filePath);
         if ($imageInfo === false) {
             return null;
         }
 
         $exif_data = [];
         if (function_exists('exif_read_data') && in_array($imageInfo[2], [IMAGETYPE_JPEG, IMAGETYPE_TIFF_II, IMAGETYPE_TIFF_MM])) {
-            $exif = @exif_read_data($filePath);
-            if ($exif !== false) {
+            $exif = exif_read_data($filePath);
+            if ($exif === false) {
+                $error = error_get_last();
+                log_error("Failed to read EXIF data for {$filePath}: " . ($error['message'] ?? 'Unknown error'));
+            } else {
                 $rawDate = $exif['DateTimeOriginal'] ?? $exif['DateTime'] ?? null;
                 $exif_data['date_taken'] = parseAndValidateExifDate($rawDate);
                 $exif_data['camera_model'] = isset($exif['Model']) ? trim($exif['Model']) : null;
@@ -745,11 +796,11 @@ if (!$smartOnly) {
             }
         }
 
-        list($width, $height, $type) = @getimagesize($sourcePath);
-        if (!$width || !$height) {
-            log_error("Could not get image size for thumbnail: {$sourcePath}");
+        $imageInfo = safeGetImageSize($sourcePath);
+        if ($imageInfo === false) {
             return false;
         }
+        list($width, $height, $type) = $imageInfo;
 
         $newWidth = min($width, $maxWidth);
         $newHeight = floor($height * ($newWidth / $width));
@@ -853,7 +904,11 @@ if (!$smartOnly) {
 
         $filetype = null;
         if ($useFiletype && !$fileInfo->isDir()) {
-            $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path) . ' 2>/dev/null'));
+            $command = 'file -b ' . escapeshellarg($path) . ' 2>/dev/null';
+            $filetype = trim(shell_exec($command));
+            if (empty($filetype)) {
+                log_error("file command failed or returned empty output for {$path}. Command: {$command}");
+            }
             if ($safeDelayUs > 0) usleep($safeDelayUs);
         }
 
