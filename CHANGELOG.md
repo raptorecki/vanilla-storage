@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Bumped `app_version` to 1.1.10.
 
+### Fixed
+- **Scan Script (`scan_drive.php`):**
+  - Improved `ExiftoolManager` resource management to prevent leaks by ensuring proper process cleanup during script termination.
+  - Enhanced error recovery in the file processing loop, introducing exponential backoff and broader detection of filesystem errors (e.g., 'Permission denied', 'Input/output error').
+
 ## [1.1.9] - 2025-09-06
 
 ### Added
