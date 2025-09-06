@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Bumped `app_version` to 1.1.12.
 
+## [1.1.11] - 2025-08-24
+
+### Changed
+
+- `scan_drive.php` improvements:
+    - Optimized database commit frequency using a time-based strategy with a count-based fallback.
+
 ## [1.1.10] - 2025-09-06
 
 ### Changed
