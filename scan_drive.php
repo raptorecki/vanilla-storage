@@ -632,7 +632,6 @@ if (!$smartOnly) {
     class ExiftoolManager {
         private $proc;
         private $pipes;
-        private $isDestroyed = false;
 
         public function __construct(string $exiftoolPath) {
             $descriptorSpec = [
@@ -647,15 +646,6 @@ if (!$smartOnly) {
 
             if (!is_resource($this->proc)) {
                 throw new Exception("Failed to open exiftool process.");
-            }
-            
-            // Register this instance for cleanup
-            register_shutdown_function([$this, 'forceCleanup']);
-        }
-
-        public function forceCleanup() {
-            if (!$this->isDestroyed) {
-                $this->__destruct();
             }
         }
 
@@ -682,18 +672,13 @@ if (!$smartOnly) {
         }
 
         public function __destruct() {
-            if ($this->isDestroyed) return; 
-            
             if (is_resource($this->proc)) {
-                // Add timeout handling for cleanup
-                stream_set_timeout($this->pipes[0], 5);
                 fwrite($this->pipes[0], "-stay_open\nFalse\n");
                 fclose($this->pipes[0]);
                 fclose($this->pipes[1]);
                 fclose($this->pipes[2]);
                 proc_close($this->proc);
             }
-            $this->isDestroyed = true;
         }
     }
 
@@ -812,7 +797,166 @@ if (!$smartOnly) {
 
     // --- Main Scanning Logic ---
 
-        function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats, CommitManager $commitManager): void {
+    function processFile(
+        SplFileInfo $fileInfo,
+        int $driveId,
+        int $partitionNumber,
+        int $scanId,
+        bool $useExiftool,
+        ?ExiftoolManager $exiftoolManager,
+        int $safeDelayUs,
+        ?string $ffprobePath,
+        bool $useFiletype,
+        bool $calculateMd5,
+        array $extensionMap,
+        PDO $pdo,
+        PDOStatement $stmtCheckExisting,
+        string $mountPoint
+    ): ?array {
+        $path = $fileInfo->getPathname();
+        $relativePath = substr($path, strlen($mountPoint));
+        // Ensure directories have a trailing slash
+        if ($fileInfo->isDir() && substr($relativePath, -1) !== '/') {
+            $relativePath .= '/';
+        }
+
+        $category = $extensionMap[strtolower($fileInfo->getExtension())] ?? 'Other';
+        $metadata = ['format' => null, 'codec' => null, 'resolution' => null, 'duration' => null, 'exif_date_taken' => null, 'exif_camera_model' => null, 'product_name' => null, 'product_version' => null];
+        $exiftoolJson = null;
+
+        if (!$fileInfo->isDir()) {
+            if ($useExiftool && $exiftoolManager) {
+                $exiftoolData = $exiftoolManager->getMetadata($path);
+                if ($exiftoolData) {
+                    $exiftoolJson = json_encode($exiftoolData);
+                    $metadata['product_name'] = $exiftoolData['ProductName'] ?? null;
+                    $metadata['product_version'] = $exiftoolData['ProductVersion'] ?? null;
+                }
+            }
+            if ($safeDelayUs > 0) usleep($safeDelayUs);
+
+            if (!empty($ffprobePath)) {
+                if ($category === 'Video') {
+                    $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
+                    if ($safeDelayUs > 0) usleep($safeDelayUs);
+                }
+                if ($category === 'Audio') {
+                    $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
+                    if ($safeDelayUs > 0) usleep($safeDelayUs);
+                }
+            }
+            if ($category === 'Image') {
+                $metadata = array_merge($metadata, getImageInfo($path) ?? []);
+                if ($safeDelayUs > 0) usleep($safeDelayUs);
+            }
+        }
+
+        $filetype = null;
+        if ($useFiletype && !$fileInfo->isDir()) {
+            $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path) . ' 2>/dev/null'));
+            if ($safeDelayUs > 0) usleep($safeDelayUs);
+        }
+
+        $fileData = [
+            'drive_id' => $driveId, 'path' => $relativePath, 'path_hash' => hash('sha256', $relativePath),
+            'filename' => $fileInfo->getFilename(), 'size' => $fileInfo->isDir() ? 0 : $fileInfo->getSize(),
+            'ctime' => date('Y-m-d H:i:s', $fileInfo->getCTime()), 'mtime' => date('Y-m-d H:i:s', $fileInfo->getMTime()),
+            'media_format' => $metadata['format'], 'media_codec' => $metadata['codec'], 'media_resolution' => $metadata['resolution'],
+            'media_duration' => $metadata['duration'], 'exif_date_taken' => $metadata['exif_date_taken'],
+            'exif_camera_model' => $metadata['exif_camera_model'], 'file_category' => $fileInfo->isDir() ? 'Directory' : $category,
+            'is_directory' => $fileInfo->isDir() ? 1 : 0, 'partition_number' => $partitionNumber,
+            'product_name' => $metadata['product_name'], 'product_version' => $metadata['product_version'],
+            'exiftool_json' => $exiftoolJson, 'thumbnail_path' => null, 'last_scan_id' => $scanId,
+            'filetype' => $filetype,
+        ];
+
+        if ($calculateMd5) {
+            $currentMtime = $fileInfo->getMTime();
+            $currentSize = $fileInfo->getSize();
+
+            // Check if the file exists in the database and its mtime and size match
+            $stmtCheckExisting->execute([$driveId, hash('sha256', $relativePath)]);
+            $existingFileData = $stmtCheckExisting->fetch(PDO::FETCH_ASSOC);
+
+            if ($existingFileData &&
+                $existingFileData['mtime'] == date('Y-m-d H:i:s', $currentMtime) &&
+                $existingFileData['size'] == $currentSize) {
+                // File hasn't changed, use existing hash
+                $fileData['md5_hash'] = $existingFileData['md5_hash'];
+            } else {
+                // File has changed or is new, calculate new hash
+                $fileData['md5_hash'] = $fileInfo->isDir() ? null : hash_file('md5', $path);
+                if ($safeDelayUs > 0) usleep($safeDelayUs);
+            }
+        }
+        return $fileData;
+    }
+
+    function isRecoverableError(Exception $exception): bool {
+        $message = $exception->getMessage();
+        return strpos($message, 'stat failed') !== false ||
+               strpos($message, 'Permission denied') !== false ||
+               strpos($message, 'Input/output error') !== false;
+    }
+
+    function isIOError(Exception $exception): bool {
+        $message = $exception->getMessage();
+        return strpos($message, 'stat failed') !== false ||
+               strpos($message, 'Input/output error') !== false;
+    }
+
+    function processFileWithRetry(
+        SplFileInfo $fileInfo,
+        int $driveId,
+        int $partitionNumber,
+        int $scanId,
+        bool $useExiftool,
+        ?ExiftoolManager $exiftoolManager,
+        int $safeDelayUs,
+        ?string $ffprobePath,
+        bool $useFiletype,
+        bool $calculateMd5,
+        array $extensionMap,
+        PDO $pdo,
+        PDOStatement $stmtCheckExisting,
+        string $mountPoint,
+        string $physicalSerial,
+        string $devicePath,
+        bool $debugMode,
+        int $maxRetries = 3
+    ): ?array {
+        $lastException = null;
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                return processFile(
+                    $fileInfo, $driveId, $partitionNumber, $scanId, $useExiftool,
+                    $exiftoolManager, $safeDelayUs, $ffprobePath, $useFiletype,
+                    $calculateMd5, $extensionMap, $pdo, $stmtCheckExisting,
+                    $mountPoint
+                );
+            } catch (Exception $e) {
+                $lastException = $e;
+                if (isRecoverableError($e)) {
+                    echo "Warning: Attempt {$attempt}/{$maxRetries} failed for " . $fileInfo->getPathname() . ": " . $e->getMessage() . "\n";
+                    if ($attempt < $maxRetries) {
+                        sleep(pow(2, $attempt)); // Exponential backoff
+                        if (isIOError($e)) {
+                            if (attempt_remount($mountPoint, $physicalSerial, $devicePath)) {
+                                echo "  > Remount successful. Retrying file operation...\n";
+                            } else {
+                                echo "  > Remount failed. Continuing with retry.\n";
+                            }
+                        }
+                        continue;
+                    }
+                }
+                throw $e; // Re-throw if not recoverable or max retries reached
+            }
+        }
+        return null; // Should not be reached if an exception is always thrown or returned
+    }
+
+    function commit_progress(PDO $pdo, int $scanId, string $lastPath, array $stats, CommitManager $commitManager): void {
         // The CommitManager handles the logic of when to commit.
         // This function is now only responsible for the actual commit operation and updating scan stats.
         echo "  > Committing progress... ({$stats['scanned']} items scanned)\n";
@@ -990,103 +1134,12 @@ if (!$smartOnly) {
                 }
             }
 
-            $fileData = null;
-            $maxRetries = 5;
-            for ($retry = 0; $retry < $maxRetries; $retry++) {
-                try {
-                    $progressMessage = sprintf("[%' 9d] %s", $stats['scanned'], $relativePath);
-                    if (mb_strlen($progressMessage) > $termWidth) {
-                        $progressMessage = mb_substr($progressMessage, 0, $termWidth - 4) . '...';
-                    }
-
-                    $extension = strtolower($fileInfo->getExtension());
-                    $category = $extensionMap[$extension] ?? 'Other';
-                    $metadata = ['format' => null, 'codec' => null, 'resolution' => null, 'duration' => null, 'exif_date_taken' => null, 'exif_camera_model' => null, 'product_name' => null, 'product_version' => null];
-                    $exiftoolJson = null;
-
-                    if (!$fileInfo->isDir()) {
-                        if ($useExiftool && $exiftoolManager) {
-                            $exiftoolData = $exiftoolManager->getMetadata($path);
-                            if ($exiftoolData) {
-                                $exiftoolJson = json_encode($exiftoolData);
-                                $metadata['product_name'] = $exiftoolData['ProductName'] ?? null;
-                                $metadata['product_version'] = $exiftoolData['ProductVersion'] ?? null;
-                            }
-                        }
-                        if ($safeDelayUs > 0) usleep($safeDelayUs);
-
-                        if (!empty($ffprobePath)) {
-                            if ($category === 'Video') {
-                                $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
-                                if ($safeDelayUs > 0) usleep($safeDelayUs);
-                            }
-                            if ($category === 'Audio') {
-                                $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
-                                if ($safeDelayUs > 0) usleep($safeDelayUs);
-                            }
-                        }
-                        if ($category === 'Image') {
-                            $metadata = array_merge($metadata, getImageInfo($path) ?? []);
-                            if ($safeDelayUs > 0) usleep($safeDelayUs);
-                        }
-                    }
-
-                    $filetype = null;
-                    if ($useFiletype && !$fileInfo->isDir()) {
-                        $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path) . ' 2>/dev/null'));
-                        if ($safeDelayUs > 0) usleep($safeDelayUs);
-                    }
-
-                    $fileData = [
-                        'drive_id' => $driveId, 'path' => $relativePath, 'path_hash' => hash('sha256', $relativePath),
-                        'filename' => $fileInfo->getFilename(), 'size' => $fileInfo->isDir() ? 0 : $fileInfo->getSize(),
-                        'ctime' => date('Y-m-d H:i:s', $fileInfo->getCTime()), 'mtime' => date('Y-m-d H:i:s', $fileInfo->getMTime()),
-                        'media_format' => $metadata['format'], 'media_codec' => $metadata['codec'], 'media_resolution' => $metadata['resolution'],
-                        'media_duration' => $metadata['duration'], 'exif_date_taken' => $metadata['exif_date_taken'],
-                        'exif_camera_model' => $metadata['exif_camera_model'], 'file_category' => $fileInfo->isDir() ? 'Directory' : $category,
-                        'is_directory' => $fileInfo->isDir() ? 1 : 0, 'partition_number' => $partitionNumber,
-                        'product_name' => $metadata['product_name'], 'product_version' => $metadata['product_version'],
-                        'exiftool_json' => $exiftoolJson, 'thumbnail_path' => null, 'last_scan_id' => $scanId,
-                        'filetype' => $filetype,
-                    ];
-
-                    if ($calculateMd5) {
-                        $currentMtime = $fileInfo->getMTime();
-                        $currentSize = $fileInfo->getSize();
-
-                        // Check if the file exists in the database and its mtime and size match
-                        $stmtCheckExisting->execute([$driveId, hash('sha256', $relativePath)]);
-                        $existingFileData = $stmtCheckExisting->fetch(PDO::FETCH_ASSOC);
-
-                        if ($existingFileData &&
-                            $existingFileData['mtime'] == date('Y-m-d H:i:s', $currentMtime) &&
-                            $existingFileData['size'] == $currentSize) {
-                            // File hasn't changed, use existing hash
-                            $fileData['md5_hash'] = $existingFileData['md5_hash'];
-                        } else {
-                            // File has changed or is new, calculate new hash
-                            $fileData['md5_hash'] = $fileInfo->isDir() ? null : hash_file('md5', $path);
-                            if ($safeDelayUs > 0) usleep($safeDelayUs);
-                        }
-                    }
-
-                    break;
-
-                } catch (Exception $e) {
-                    if (strpos($e->getMessage(), 'stat failed') !== false) {
-                        echo "Warning: Caught I/O Error: " . $e->getMessage() . "\n";
-                        if (attempt_remount($mountPoint, $physicalSerial, $devicePath)) {
-                            echo "  > Retrying file operation...\n";
-                            continue;
-                        } else {
-                            echo "Error: Could not recover drive. Aborting.\n";
-                            throw new Exception("Drive recovery failed.", 0, $e);
-                        }
-                    } else {
-                        throw $e;
-                    }
-                }
-            }
+            $fileData = processFileWithRetry(
+                $fileInfo, $driveId, $partitionNumber, $scanId, $useExiftool,
+                $exiftoolManager, $safeDelayUs, $ffprobePath, $useFiletype,
+                $calculateMd5, $extensionMap, $pdo, $stmtCheckExisting,
+                $mountPoint, $physicalSerial, $devicePath, $debugMode
+            );
 
             if ($fileData === null) {
                 echo "Error: Could not process file {$relativePath} after retries. Skipping.\n";
