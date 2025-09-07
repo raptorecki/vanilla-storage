@@ -145,7 +145,7 @@ try {
  */
 function generateBreadcrumbs(int $drive_id, string $current_path): string
 {
-    $base_url = "browse.php?drive_id=".$drive_id;
+    $base_url = "browse.php?drive_id={$drive_id}";
     $html = '<a href="' . $base_url . '">Root</a>';
     if ($current_path !== '') {
         $path_parts = explode('/', $current_path);
