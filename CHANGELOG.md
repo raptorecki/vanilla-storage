@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.14] - 2025-09-07
+
+### Fixed
+- `browse.php`: Standardized path handling in SQL queries to consistently expect paths with a leading slash, improving display reliability.
+- `scan_drive.php`: Ensured all stored file paths in the `st_files` table consistently start with a leading slash, resolving inconsistencies.
+- Addressed minor code style and HTML entity encoding issues in `browse.php`.
+
 ## [1.1.13] - 2025-09-07
 
 ### Changed
