@@ -145,14 +145,14 @@ try {
  */
 function generateBreadcrumbs(int $drive_id, string $current_path): string
 {
-    $base_url = "browse.php?drive_id={$drive_id}";
-    $html = '<a href="' . $base_url . '">Root</a>';
+    $base_url = sprintf("browse.php?drive_id=%d", $drive_id);
+    $html = sprintf('<a href="%s">Root</a>', $base_url);
     if ($current_path !== '') {
         $path_parts = explode('/', $current_path);
         $built_path = '';
         foreach ($path_parts as $part) {
             $built_path .= ($built_path === '' ? '' : '/') . $part;
-            $html .= ' / <a href="' . $base_url . '&path=' . urlencode($built_path) . '">' . htmlspecialchars($part) . '</a>';
+            $html .= sprintf(' / <a href="%s&path=%s">%s</a>', $base_url, urlencode($built_path), htmlspecialchars($part));
         }
     }
     return $html;
