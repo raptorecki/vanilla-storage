@@ -27,7 +27,7 @@ if ($exif_file_id) {
         } else {
             $exif_error = 'No EXIF data found for this file.';
         }
-    } catch (\PDOException $e) {
+    } catch (	PDOException $e) {
         $exif_error = 'Error fetching EXIF data.';
         log_error("EXIF Fetch Error: " . $e->getMessage());
     }
@@ -72,7 +72,7 @@ if ($filetype_file_id) {
         } else {
             $filetype_error = 'No filetype data found for this file.';
         }
-    } catch (\PDOException $e) {
+    } catch (	PDOException $e) {
         $filetype_error = 'Error fetching filetype data.';
         log_error("Filetype Fetch Error: " . $e->getMessage());
     }
@@ -90,7 +90,7 @@ if (!$drive_id) {
 
 // Sanitize and normalize the path to prevent directory traversal attacks
 $current_path_raw = $_GET['path'] ?? '';
-$current_path = trim(preg_replace('#/+#', '/', str_replace(['\', '../'], '/', $current_path_raw)), '/');
+$current_path = trim(preg_replace('#/+#', '/', str_replace(['\\', '../'], '/', $current_path_raw)), '/');
 
 
 // --- Data Fetching ---
@@ -113,19 +113,27 @@ try {
     // 2. Get File/Directory Listing for the current path
     $params = [$drive_id];
     if ($current_path === '') {
-        // Root directory: find paths that are direct children of the root.
-        // Now assuming all paths in DB have a leading slash.
-        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND path NOT LIKE '%/%' AND date_deleted IS NULL ORDER BY is_directory DESC, filename ASC";
+        // Root directory: find paths where the path, after removing a potential leading slash, contains no other slashes.
+        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND TRIM(LEADING '/' FROM path) NOT LIKE '%/%' AND date_deleted IS NULL ORDER BY is_directory DESC, filename ASC";
     } else {
         // Subdirectory: find paths that are one level deeper.
-        // Assuming all paths in DB have a leading slash.
-        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND date_deleted IS NULL AND (path LIKE ? AND path NOT LIKE ?) ORDER BY is_directory DESC, filename ASC";
+        // The path in the DB is stored with a leading slash (e.g., /movies/file.mkv),
+        // while $current_path is 'movies'. We must prepend a slash for the LIKE to match.
+        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND date_deleted IS NULL AND (";
+        $sql .= " (path LIKE ? AND path NOT LIKE ?) OR "; // Case 1: path with leading slash
+        $sql .= " (path LIKE ? AND path NOT LIKE ?) ";    // Case 2: path without leading slash
+        $sql .= ") ORDER BY is_directory DESC, filename ASC";
 
         $path_prefix_with_slash = '/' . $current_path . '/';
+        $path_prefix_without_slash = $current_path . '/';
 
-        // Add parameters for the single case (paths with leading slash)
+        // Add parameters for Case 1
         $params[] = $path_prefix_with_slash . '%';
         $params[] = $path_prefix_with_slash . '%/%';
+
+        // Add parameters for Case 2
+        $params[] = $path_prefix_without_slash . '%';
+        $params[] = $path_prefix_without_slash . '%/%';
     }
 
     $stmt = $pdo->prepare($sql);
@@ -145,14 +153,14 @@ try {
  */
 function generateBreadcrumbs(int $drive_id, string $current_path): string
 {
-    $base_url = sprintf("browse.php?drive_id=%d", $drive_id);
-    $html = sprintf('<a href="%s">Root</a>', $base_url);
+    $base_url = "browse.php?drive_id={$drive_id}";
+    $html = '<a href="' . $base_url . '">Root</a>';
     if ($current_path !== '') {
         $path_parts = explode('/', $current_path);
         $built_path = '';
         foreach ($path_parts as $part) {
             $built_path .= ($built_path === '' ? '' : '/') . $part;
-            $html .= sprintf(' / <a href="%s&path=%s">%s</a>', $base_url, urlencode($built_path), htmlspecialchars($part));
+            $html .= ' / <a href="' . $base_url . '&path=' . urlencode($built_path) . '">' . htmlspecialchars($part) . '</a>';
         }
     }
     return $html;
@@ -249,7 +257,7 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
                             <td><span class="icon"><?= $file['is_directory'] ? '&#128193;' : '&#128441;' ?></span></td>
                             <td>
                                 <?php if ($file['is_directory']):
-                                    ?><a href="browse.php?drive_id=<?= $drive_id ?>&amp;path=<?= urlencode($file['path']) ?>"><?= htmlspecialchars($file['filename']) ?></a><?php
+                                    ?><a href="browse.php?drive_id=<?= $drive_id ?>&path=<?= urlencode($file['path']) ?>"><?= htmlspecialchars($file['filename']) ?></a><?php
                                 else:
                                     ?><?= htmlspecialchars($file['filename']) ?><?php
                                 endif; ?>
@@ -275,8 +283,8 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
                                 <?php if (!$file['is_directory'] && !empty($file['thumbnail_path'])):
                                     ?><?php if (!empty($file['exiftool_json'])): ?> | <?php endif; ?><a href="?<?= http_build_query(array_merge($_GET, ['view_thumb' => $file['id']])) ?>" class="action-btn">Thumb</a><?php
                                 endif; ?>
-                                <?php if (!$file['is_directory'] && !empty($file['filetype'])):
-                                    ?><?php if (!empty($file['exiftool_json']) || !empty($file['thumbnail_path'])): ?> | <?php endif; ?><a href="?<?= http_build_query(array_merge($_GET, ['view_filetype' => $file['id']])) ?>" class="action-btn">Filetype</a><?php
+                                <?php if (!$file['is_directory'] && !empty($file['filetype'])): ?>
+                                    <?php if (!empty($file['exiftool_json']) || !empty($file['thumbnail_path'])): ?> | <?php endif; ?><a href="?<?= http_build_query(array_merge($_GET, ['view_filetype' => $file['id']])) ?>" class="action-btn">Filetype</a><?php
                                 endif; ?>
                             </td>
                         </tr>
