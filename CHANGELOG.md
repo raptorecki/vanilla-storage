@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.13] - 2025-09-07
+
+### Changed
+- `scan_drive.php`: Modified `exiftool_json` storage format to consistently store data as a JSON array, aligning with `exiftool`'s default output and improving compatibility with existing data.
+
 ## [1.1.12] - 2025-09-07
 
 ### Changed

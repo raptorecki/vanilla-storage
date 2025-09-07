@@ -664,8 +664,8 @@ if (!$smartOnly) {
             }
 
             $data = json_decode($output, true);
-            if (json_last_error() === JSON_ERROR_NONE && isset($data[0])) {
-                return $data[0];
+            if (json_last_error() === JSON_ERROR_NONE && is_array($data)) {
+                return $data; // Return the full array
             }
 
             return null;
