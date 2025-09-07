@@ -496,3 +496,6 @@ body {
     font-size: 0.8em;
     line-height: 20px; /* Center text vertically */
 }
+
+.progress-bar.dead-bar { background-color: #606060; } /* Grey for dead drives */
+.progress-bar.online-bar { background-color: #3a7ab8; } /* Blue for online drives */

@@ -131,7 +131,7 @@ try {
         LEFT JOIN
             st_scans s ON d.id = s.drive_id
         WHERE
-            d.dead = 0 AND d.empty = 0 AND s.scan_date IS NULL
+            d.dead = 0 AND d.empty = 0 AND d.online = 0 AND s.scan_date IS NULL
     ")->fetchAll();
 
     // 7. Get count of drives with completed scans

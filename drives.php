@@ -202,33 +202,45 @@ try {
                                     echo '<span title="' . htmlspecialchars($drive['summary'] ?? '') . '">' . htmlspecialchars(mb_strimwidth($drive['summary'] ?? '—', 0, 40, "...")) . '</span>';
                                     break;
                                 case 'used_free':
-                                    $capacity_gb = $drive['size']; // This is in GB
-                                    $capacity_bytes = $capacity_gb * 1073741824; // Convert GB to Bytes
-                                    $used_bytes = $drive['used_bytes'] ?? 0; // Default to 0 if null (no files scanned)
-
-                                    // Check if the drive has been scanned at all
-                                    if (empty($drive['last_scan'])) {
-                                        echo 'N/A'; // Drive has not been scanned yet
-                                    } elseif ($capacity_bytes > 0) {
-                                        $percentage_used = ($used_bytes / $capacity_bytes) * 100;
-                                        $percentage_rounded = round($percentage_used, 1);
-
-                                        // Calculate used and free GB
-                                        $used_gb = round($used_bytes / 1073741824, 2);
-                                        $free_gb = round(($capacity_bytes - $used_bytes) / 1073741824, 2);
-
-                                        $bar_color_class = 'green';
-                                        if ($percentage_used >= 85) {
-                                            $bar_color_class = 'red';
-                                        } elseif ($percentage_used >= 50) {
-                                            $bar_color_class = 'yellow';
-                                        }
-                                        echo '<div class="progress-bar-container" title="' . $percentage_rounded . '% Used (' . $used_gb . ' GB Used, ' . $free_gb . ' GB Free)">';
-                                        echo '<div class="progress-bar ' . $bar_color_class . '" style="width: ' . $percentage_used . '%;"></div>';
-                                        echo '<span class="progress-bar-text">' . $percentage_rounded . '%</span>';
+                                    if ($drive['dead'] == 1) {
+                                        echo '<div class="progress-bar-container" title="Drive is Dead">';
+                                        echo '<div class="progress-bar dead-bar" style="width: 100%;"></div>';
+                                        echo '<span class="progress-bar-text">DEAD</span>';
+                                        echo '</div>';
+                                    } elseif ($drive['online'] == 1) {
+                                        echo '<div class="progress-bar-container" title="Drive is Online">';
+                                        echo '<div class="progress-bar online-bar" style="width: 100%;"></div>';
+                                        echo '<span class="progress-bar-text">ONLINE</span>';
                                         echo '</div>';
                                     } else {
-                                        echo 'N/A'; // Capacity is 0 or other edge case
+                                        $capacity_gb = $drive['size']; // This is in GB
+                                        $capacity_bytes = $capacity_gb * 1073741824; // Convert GB to Bytes
+                                        $used_bytes = $drive['used_bytes'] ?? 0; // Default to 0 if null (no files scanned)
+
+                                        // Check if the drive has been scanned at all
+                                        if (empty($drive['last_scan'])) {
+                                            echo 'N/A'; // Drive has not been scanned yet
+                                        } elseif ($capacity_bytes > 0) {
+                                            $percentage_used = ($used_bytes / $capacity_bytes) * 100;
+                                            $percentage_rounded = round($percentage_used, 1);
+
+                                            // Calculate used and free GB
+                                            $used_gb = round($used_bytes / 1073741824, 2);
+                                            $free_gb = round(($capacity_bytes - $used_bytes) / 1073741824, 2);
+
+                                            $bar_color_class = 'green';
+                                            if ($percentage_used >= 85) {
+                                                $bar_color_class = 'red';
+                                            } elseif ($percentage_used >= 50) {
+                                                $bar_color_class = 'yellow';
+                                            }
+                                            echo '<div class="progress-bar-container" title="' . $percentage_rounded . '% Used (' . $used_gb . ' GB Used, ' . $free_gb . ' GB Free)">';
+                                            echo '<div class="progress-bar ' . $bar_color_class . '" style="width: ' . $percentage_used . '%;"></div>';
+                                            echo '<span class="progress-bar-text">' . $percentage_rounded . '%</span>';
+                                            echo '</div>';
+                                        } else {
+                                            echo 'N/A'; // Capacity is 0 or other edge case
+                                        }
                                     }
                                     break;
                                 case 'dead':
