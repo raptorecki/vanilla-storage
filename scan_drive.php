@@ -947,6 +947,10 @@ if (!$smartOnly) {
             if ($fileInfo->isDir() && substr($relativePath, -1) !== '/') {
                 $relativePath .= '/';
             }
+            // Ensure relativePath always starts with a leading slash
+            if (substr($relativePath, 0, 1) !== '/') {
+                $relativePath = '/' . $relativePath;
+            }
             $GLOBALS['current_scanned_path'] = $relativePath;
 
             if (!$foundResumePath) {
