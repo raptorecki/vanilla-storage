@@ -953,6 +953,20 @@ if (!$smartOnly) {
             }
             $GLOBALS['current_scanned_path'] = $relativePath;
 
+            // After path construction, add validation:
+            if ($debugMode) {
+                echo "DEBUG: Constructed path: '{$relativePath}', filename: '{$fileInfo->getFilename()}'\n";
+            }
+
+            // Ensure path consistency
+            if (!preg_match('/^\//', $relativePath)) {
+                throw new Exception("Path construction error: missing leading slash in '{$relativePath}'");
+            }
+
+            if ($fileInfo->isDir() && !preg_match('/\/$/', $relativePath)) {
+                throw new Exception("Directory path construction error: missing trailing slash in '{$relativePath}'");
+            }
+
             if (!$foundResumePath) {
                 if ($relativePath === $lastScannedPath) {
                     $foundResumePath = true;

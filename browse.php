@@ -90,7 +90,18 @@ if (!$drive_id) {
 
 // Sanitize and normalize the path to prevent directory traversal attacks
 $current_path_raw = $_GET['path'] ?? '';
-$current_path = trim(preg_replace('#/+#', '/', str_replace(['\\', '../'], '/', $current_path_raw)), '/');
+// Sanitize but preserve the leading slash requirement
+$current_path_clean = preg_replace('#/+#', '/', str_replace(['\\', '../'], '/', $current_path_raw));
+$current_path = trim($current_path_clean, '/'); // Remove trailing slashes only
+
+if ($debug_mode) {
+    echo "<!-- Debug: current_path_raw='" . htmlspecialchars($current_path_raw) . "' -->\n";
+    echo "<!-- Debug: current_path='" . htmlspecialchars($current_path) . "' -->\n";
+    if (isset($path_prefix)) {
+        echo "<!-- Debug: path_prefix='" . htmlspecialchars($path_prefix) . "' -->\n";
+    }
+}
+
 
 
 // --- Data Fetching ---
@@ -114,26 +125,36 @@ try {
     $params = [$drive_id];
     if ($current_path === '') {
         // Root directory: find paths where the path, after removing a potential leading slash, contains no other slashes.
-        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND TRIM(LEADING '/' FROM path) NOT LIKE '%/%' AND date_deleted IS NULL ORDER BY is_directory DESC, filename ASC";
+            $sql = "SELECT * FROM st_files WHERE drive_id = ? AND path REGEXP '^/[^/]+(/?)$' AND date_deleted IS NULL ORDER BY is_directory DESC, filename ASC";
     } else {
-        // Subdirectory: find paths that are one level deeper.
-        // The path in the DB is stored with a leading slash (e.g., /movies/file.mkv),
-        // while $current_path is 'movies'. We must prepend a slash for the LIKE to match.
-        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND date_deleted IS NULL AND (";
-        $sql .= " (path LIKE ? AND path NOT LIKE ?) OR "; // Case 1: path with leading slash
-        $sql .= " (path LIKE ? AND path NOT LIKE ?) ";    // Case 2: path without leading slash
-        $sql .= ") ORDER BY is_directory DESC, filename ASC";
-
-        $path_prefix_with_slash = '/' . $current_path . '/';
-        $path_prefix_without_slash = $current_path . '/';
-
-        // Add parameters for Case 1
-        $params[] = $path_prefix_with_slash . '%';
-        $params[] = $path_prefix_with_slash . '%/%';
-
-        // Add parameters for Case 2
-        $params[] = $path_prefix_without_slash . '%';
-        $params[] = $path_prefix_without_slash . '%/%';
+        // Subdirectory: find files and directories that are exactly one level deeper
+        $path_prefix = '/' . ltrim($current_path, '/') . '/';
+        
+        // We want paths that:
+        // 1. Start with our path prefix (e.g., "/Final Renders/")
+        // 2. Have content after the prefix
+        // 3. Don't have any additional slashes after the prefix content (except trailing slash for directories)
+        
+        $sql = "SELECT * FROM st_files WHERE drive_id = ? AND date_deleted IS NULL AND 
+                path LIKE ? AND 
+                (
+                    -- Match directories: /Final Renders/Audio/ (ends with single slash)
+                    (path REGEXP ? AND is_directory = 1) OR
+                    -- Match files: /Final Renders/file.txt (no trailing slash)
+                    (path REGEXP ? AND is_directory = 0)
+                )
+                ORDER BY is_directory DESC, filename ASC";
+        
+        // Parameters
+        $params[] = $path_prefix . '%';  // Basic prefix match
+        
+        // REGEXP for directories: /Final Renders/[^/]+/$ (exactly one more segment ending with slash)
+        $dir_pattern = '^' . preg_quote($path_prefix, null) . '[^/]+/$';
+        $params[] = $dir_pattern;
+        
+        // REGEXP for files: /Final Renders/[^/]+$ (exactly one more segment, no trailing slash)
+        $file_pattern = '^' . preg_quote($path_prefix, null) . '[^/]+$';
+        $params[] = $file_pattern;
     }
 
     $stmt = $pdo->prepare($sql);
@@ -156,10 +177,10 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
     $base_url = "browse.php?drive_id={$drive_id}";
     $html = '<a href="' . $base_url . '">Root</a>';
     if ($current_path !== '') {
-        $path_parts = explode('/', $current_path);
+        $path_parts = array_filter(explode('/', trim($current_path, '/')));
         $built_path = '';
         foreach ($path_parts as $part) {
-            $built_path .= ($built_path === '' ? '' : '/') . $part;
+            $built_path = $built_path === '' ? $part : $built_path . '/' . $part;
             $html .= ' / <a href="' . $base_url . '&path=' . urlencode($built_path) . '">' . htmlspecialchars($part) . '</a>';
         }
     }
@@ -188,7 +209,7 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
     <?= generateBreadcrumbs($drive_id, $current_path) ?>
 </div>
 
-<a href="index.php" style="color: #a9d1ff; text-decoration: none; display: inline-block; margin-bottom: 20px;">&larr; Back to Home/Search</a>
+<a href="drives.php" style="color: #a9d1ff; text-decoration: none; display: inline-block; margin-bottom: 20px;">&larr; Back to Home/Search</a>
 
 <?php if ($exif_data): ?>
 <div class="exif-viewer">
@@ -257,8 +278,10 @@ function generateBreadcrumbs(int $drive_id, string $current_path): string
                             <td><span class="icon"><?= $file['is_directory'] ? '&#128193;' : '&#128441;' ?></span></td>
                             <td>
                                 <?php if ($file['is_directory']):
-                                    ?><a href="browse.php?drive_id=<?= $drive_id ?>&path=<?= urlencode($file['path']) ?>"><?= htmlspecialchars($file['filename']) ?></a><?php
-                                else:
+                                    $clean_filename = rtrim($file['filename'], '/');
+                                    $new_path = $current_path === '' ? $clean_filename : $current_path . '/' . $clean_filename;
+                                    ?><a href="browse.php?drive_id=<?= $drive_id ?>&path=<?= urlencode($new_path) ?>"><?= htmlspecialchars($file['filename']) ?></a><?php
+                                        else:
                                     ?><?= htmlspecialchars($file['filename']) ?><?php
                                 endif; ?>
                             </td>
