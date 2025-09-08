@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.18] - 2025-09-08
+
+### Fixed
+- `scan_drive.php`: Corrected a bug where the final scan summary would incorrectly display all zeros. The script now reliably shows the final statistics by using in-memory data for the report and consolidating final database updates into a single query.
+
 ## [1.1.17] - 2025-09-07
 
 ### Changed

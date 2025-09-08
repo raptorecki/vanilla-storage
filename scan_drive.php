@@ -1166,8 +1166,6 @@ if (!$smartOnly) {
         $stmt->execute([$driveId]);
 
         $duration = microtime(true) - $startTime;
-        $finalStmt = $pdo->prepare("UPDATE st_scans SET status = 'completed', scan_duration = ?, files_skipped = ? WHERE scan_id = ?");
-        $finalStmt->execute([round($duration), $stats['skipped'], $scanId]);
 
         echo "\nStep 4: Marking files not found in this scan as deleted...\n";
         $markDeletedStmt = $pdo->prepare(
@@ -1177,9 +1175,49 @@ if (!$smartOnly) {
         $deletedCount = $markDeletedStmt->rowCount();
         echo "  > Marked {$deletedCount} files as deleted.\n";
 
-        $updateDeletedStmt = $pdo->prepare("UPDATE st_scans SET files_marked_deleted = ? WHERE scan_id = ?");
-        $updateDeletedStmt->execute([$deletedCount, $scanId]);
-        
+        // Consolidate all final stats into one update
+        $finalStatsUpdateStmt = $pdo->prepare(
+            "UPDATE st_scans SET
+                status = 'completed',
+                scan_duration = ?,
+                total_items_scanned = ?,
+                new_files_added = ?,
+                existing_files_updated = ?,
+                files_marked_deleted = ?,
+                files_skipped = ?,
+                thumbnails_created = ?,
+                thumbnail_creations_failed = ?
+            WHERE scan_id = ?"
+        );
+        $finalStatsUpdateStmt->execute([
+            round($duration),
+            $stats['scanned'],
+            $stats['added'],
+            $stats['updated'],
+            $deletedCount,
+            $stats['skipped'],
+            $stats['thumbnails_created'] ?? 0,
+            $stats['thumbnails_failed'] ?? 0,
+            $scanId
+        ]);
+
+        // Display final report from in-memory stats
+        $durationFormatted = round($duration) . " seconds";
+        if ($duration > 60) {
+            $minutes = floor($duration / 60);
+            $seconds = round($duration) % 60;
+            $durationFormatted = "{$minutes} minutes, {$seconds} seconds";
+        }
+
+        echo "\n--- Scan Complete ---\n";
+        echo "Total Items Scanned:  " . number_format($stats['scanned']) . "\n";
+        echo "New Files Added:      " . number_format($stats['added']) . "\n";
+        echo "Existing Files Updated: " . number_format($stats['updated']) . "\n";
+        echo "Files Marked Deleted: " . number_format($deletedCount) . "\n";
+        echo "Existing Files Skipped: " . number_format($stats['skipped']) . "\n";
+        echo "Scan Duration:        {$durationFormatted}\n";
+        echo "---------------------\n";
+
         $GLOBALS['scanId'] = null;
 
     } catch (Exception $e) {
@@ -1204,45 +1242,4 @@ if (!$smartOnly) {
 
         exit(1);
     }
-
-    $finalStatsUpdateStmt = $pdo->prepare(
-        "UPDATE st_scans SET
-            total_items_scanned = ?,
-            new_files_added = ?,
-            existing_files_updated = ?,
-            files_skipped = ?,
-            thumbnails_created = ?,
-            thumbnail_creations_failed = ?
-        WHERE scan_id = ?"
-    );
-    $finalStatsUpdateStmt->execute([
-        $stats['scanned'],
-        $stats['added'],
-        $stats['updated'],
-        $stats['skipped'],
-        $stats['thumbnails_created'] ?? 0,
-        $stats['thumbnails_failed'] ?? 0,
-        $scanId
-    ]);
-
-    $finalStatsStmt = $pdo->prepare("SELECT * FROM st_scans WHERE scan_id = ?");
-    $finalStatsStmt->execute([$scanId]);
-    $finalStats = $finalStatsStmt->fetch();
-
-
-    $durationFormatted = round($finalStats['scan_duration']) . " seconds";
-    if ($finalStats['scan_duration'] > 60) {
-        $minutes = floor($finalStats['scan_duration'] / 60);
-        $seconds = $finalStats['scan_duration'] % 60;
-        $durationFormatted = "{$minutes} minutes, {$seconds} seconds";
-    }
-
-    echo "\n--- Scan Complete ---\n";
-    echo "Total Items Scanned:  " . number_format($finalStats['total_items_scanned']) . "\n";
-    echo "New Files Added:      " . number_format($finalStats['new_files_added']) . "\n";
-    echo "Existing Files Updated: " . number_format($finalStats['existing_files_updated']) . "\n";
-    echo "Files Marked Deleted: " . number_format($finalStats['files_marked_deleted']) . "\n";
-    echo "Existing Files Skipped: " . number_format($finalStats['files_skipped']) . "\n";
-    echo "Scan Duration:        {$durationFormatted}\n";
-    echo "---------------------\n";
 }
