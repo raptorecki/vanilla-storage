@@ -9,3 +9,4 @@ tests/
 logs/
 thumbnails/
 *.sql
+thumb_test.php

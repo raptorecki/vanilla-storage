@@ -663,6 +663,14 @@ if (!$smartOnly) {
                 $output .= $line;
             }
 
+            // Read any errors from stderr
+            stream_set_blocking($this->pipes[2], false);
+            $errorOutput = stream_get_contents($this->pipes[2]);
+            if (!empty($errorOutput)) {
+                log_error("Exiftool stderr for file {$filePath}: " . trim($errorOutput));
+            }
+            stream_set_blocking($this->pipes[2], true);
+
             $data = json_decode($output, true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($data)) {
                 return $data; // Return the full array
@@ -753,6 +761,11 @@ if (!$smartOnly) {
 
         $newWidth = min($width, $maxWidth);
         $newHeight = floor($height * ($newWidth / $width));
+
+        if ($newWidth <= 0 || $newHeight <= 0) {
+            log_error("Skipping thumbnail for {$sourcePath} due to invalid calculated dimensions: {$newWidth}x{$newHeight}");
+            return false;
+        }
 
         $thumb = imagecreatetruecolor($newWidth, $newHeight);
         if ($thumb === false) {

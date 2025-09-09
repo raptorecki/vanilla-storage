@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.20] - 2025-09-10
+
+### Fixed
+- `scan_drive.php`: The script no longer crashes when trying to create a thumbnail for a malformed image (e.g., an image with a height of 1px that results in a calculated thumbnail height of 0px). It now skips creating a thumbnail for such files and logs the issue.
+
 ## [1.1.19] - 2025-09-10
 
 ### Fixed
