@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.19] - 2025-09-10
+
+### Fixed
+- `scan_drive.php`: Fixed a bug where the script would crash on filenames with special characters (e.g., containing `!`, `(`, `)`, `'`) or non-ASCII characters. The `ExiftoolManager` now correctly handles such filenames by specifying the UTF-8 charset.
+
 ## [1.1.18] - 2025-09-08
 
 ### Fixed

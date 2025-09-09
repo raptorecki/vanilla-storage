@@ -1,6 +1,6 @@
 <?php
 
 return [
-    'app_version' => '1.1.18',
+    'app_version' => '1.1.19',
     'db_schema_version' => '1.0.4',
 ];

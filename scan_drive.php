@@ -640,7 +640,7 @@ if (!$smartOnly) {
                 2 => ["pipe", "w"]   // stderr
             ];
 
-            $command = sprintf('%s -stay_open True -@ -', escapeshellarg($exiftoolPath));
+            $command = sprintf('%s -charset filename=UTF8 -stay_open True -@ -', escapeshellarg($exiftoolPath));
 
             $this->proc = proc_open($command, $descriptorSpec, $this->pipes);
 
