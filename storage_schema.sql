@@ -3,7 +3,7 @@
 --
 -- Host: localhost    Database: storage
 -- ------------------------------------------------------
--- Server version	10.11.11-MariaDB-0+deb12u1
+-- Server version	10.11.11-MariaDB-0+deb12u1-log
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -47,7 +47,7 @@ CREATE TABLE `st_drives` (
   `filesystem` varchar(50) DEFAULT NULL COMMENT 'Filesystem of the drive (e.g., ext4, ntfs, apfs)',
   PRIMARY KEY (`id`),
   KEY `pair_id_idx` (`pair_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=90 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=98 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -83,6 +83,7 @@ CREATE TABLE `st_files` (
   `exiftool_json` mediumtext DEFAULT NULL,
   `thumbnail_path` varchar(255) DEFAULT NULL,
   `last_scan_id` int(11) DEFAULT NULL,
+  `filetype` text DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `drive_path_unique` (`drive_id`,`path_hash`),
   UNIQUE KEY `drive_id_partition_path_hash_unique` (`drive_id`,`partition_number`,`path_hash`),
@@ -92,7 +93,33 @@ CREATE TABLE `st_files` (
   KEY `fk_last_scan` (`last_scan_id`),
   CONSTRAINT `fk_last_scan` FOREIGN KEY (`last_scan_id`) REFERENCES `st_scans` (`scan_id`) ON DELETE SET NULL,
   CONSTRAINT `st_files_drive_id_fk` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=243106 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1730471 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `st_recovery`
+--
+
+DROP TABLE IF EXISTS `st_recovery`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `st_recovery` (
+  `recovery_id` int(11) NOT NULL AUTO_INCREMENT,
+  `drive_id` int(11) NOT NULL,
+  `scan_id` int(11) NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `tool` varchar(50) NOT NULL,
+  `command` text NOT NULL,
+  `output_type` varchar(20) NOT NULL,
+  `output_data` longblob DEFAULT NULL,
+  `output_text` longtext DEFAULT NULL,
+  `description` text DEFAULT NULL,
+  PRIMARY KEY (`recovery_id`),
+  KEY `idx_drive_id` (`drive_id`),
+  KEY `idx_scan_id` (`scan_id`),
+  CONSTRAINT `st_recovery_ibfk_1` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `st_recovery_ibfk_2` FOREIGN KEY (`scan_id`) REFERENCES `st_scans` (`scan_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -118,10 +145,32 @@ CREATE TABLE `st_scans` (
   `thumbnail_creations_failed` int(11) DEFAULT 0,
   `thumbnails_queued` int(11) DEFAULT 0,
   `thumbnail_queueing_failed` int(11) DEFAULT 0,
+  `estimated_total_items` int(11) DEFAULT 0,
+  `estimated_total_size` bigint(20) DEFAULT 0,
+  `bytes_processed` bigint(20) DEFAULT 0,
+  `eta_calculated_at` datetime DEFAULT NULL,
   PRIMARY KEY (`scan_id`),
   KEY `drive_id` (`drive_id`),
   CONSTRAINT `st_scans_ibfk_1` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=59 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `st_smart`
+--
+
+DROP TABLE IF EXISTS `st_smart`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `st_smart` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `drive_id` int(11) NOT NULL,
+  `output` text DEFAULT NULL,
+  `scan_date` datetime DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `drive_id` (`drive_id`),
+  CONSTRAINT `st_smart_ibfk_1` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=136 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -145,4 +194,4 @@ CREATE TABLE `st_version` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-08-22  1:31:39
+-- Dump completed on 2025-09-10  1:43:55

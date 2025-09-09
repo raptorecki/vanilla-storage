@@ -48,6 +48,7 @@ if (posix_getuid() !== 0) {
 require_once 'database.php';
 require_once 'helpers/error_logger.php';
 require_once 'helpers.php';
+require_once 'disk_recovery.php';
 
 $config = require 'config.php';
 // Set memory limit from config
@@ -422,6 +423,11 @@ try {
             $updateStmt->execute($updateParams);
             echo "  > Updated drive information in database.\n";
         }
+    }
+
+    // --- Collect recovery data ---
+    if (!$smartOnly) {
+        collect_recovery_data($pdo, $driveId, $scanId, $deviceForSerial);
     }
 
 } catch (Exception $e) {

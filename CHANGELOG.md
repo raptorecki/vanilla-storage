@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.21] - 2025-09-10
+## [1.1.22] - 2025-09-10
+
+### Added
+- `scan_drive.php`: Added functionality to collect and store drive recovery data.
+- `disk_recovery.php`: New file containing functions for collecting drive recovery data.
+
+### Changed
+- `scan_drive.php`: Now calls the `collect_recovery_data` function from `disk_recovery.php` to store recovery information.
 
 ### Changed
 - `scan_drive.php`: Improved debug output verbosity. When run with the `--debug` flag, the script now provides detailed, step-by-step logging for all major operations within the file processing loop, including metadata extraction, hashing, database operations, and thumbnail generation.
