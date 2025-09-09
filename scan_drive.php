@@ -1022,6 +1022,9 @@ if (!$smartOnly) {
 
                     if (!$fileInfo->isDir()) {
                         if ($useExiftool && $exiftoolManager) {
+                            if ($debugMode) {
+                                echo "\nDEBUG: Extracting metadata with Exiftool...";
+                            }
                             $exiftoolData = $exiftoolManager->getMetadata($path);
                             if ($exiftoolData) {
                                 $exiftoolJson = json_encode($exiftoolData);
@@ -1033,15 +1036,24 @@ if (!$smartOnly) {
 
                         if (!empty($ffprobePath)) {
                             if ($category === 'Video') {
+                                if ($debugMode) {
+                                    echo "\nDEBUG: Extracting video metadata with ffprobe...";
+                                }
                                 $metadata = array_merge($metadata, getVideoInfo($path, $ffprobePath) ?? []);
                                 if ($safeDelayUs > 0) usleep($safeDelayUs);
                             }
                             if ($category === 'Audio') {
+                                if ($debugMode) {
+                                    echo "\nDEBUG: Extracting audio metadata with ffprobe...";
+                                }
                                 $metadata = array_merge($metadata, getAudioInfo($path, $ffprobePath) ?? []);
                                 if ($safeDelayUs > 0) usleep($safeDelayUs);
                             }
                         }
                         if ($category === 'Image') {
+                            if ($debugMode) {
+                                echo "\nDEBUG: Extracting image metadata with getImageInfo...";
+                            }
                             $metadata = array_merge($metadata, getImageInfo($path) ?? []);
                             if ($safeDelayUs > 0) usleep($safeDelayUs);
                         }
@@ -1049,6 +1061,9 @@ if (!$smartOnly) {
 
                     $filetype = null;
                     if ($useFiletype && !$fileInfo->isDir()) {
+                        if ($debugMode) {
+                            echo "\nDEBUG: Determining file type with 'file' command...";
+                        }
                         $filetype = trim(@shell_exec('file -b ' . escapeshellarg($path) . ' 2>/dev/null'));
                         if ($safeDelayUs > 0) usleep($safeDelayUs);
                     }
@@ -1080,6 +1095,9 @@ if (!$smartOnly) {
                             // File hasn't changed, use existing hash
                             $fileData['md5_hash'] = $existingFileData['md5_hash'];
                         } else {
+                            if ($debugMode) {
+                                echo "\nDEBUG: Calculating MD5 hash...";
+                            }
                             // File has changed or is new, calculate new hash
                             $fileData['md5_hash'] = $fileInfo->isDir() ? null : hash_file('md5', $path);
                             if ($safeDelayUs > 0) usleep($safeDelayUs);
@@ -1109,6 +1127,9 @@ if (!$smartOnly) {
                 continue;
             }
 
+            if ($debugMode) {
+                echo "\nDEBUG: Upserting file data to database...";
+            }
             $upsertStmt->execute($fileData);
             $rowCount = $upsertStmt->rowCount();
 
@@ -1132,15 +1153,15 @@ if (!$smartOnly) {
             echo $progressMessage;
 
             if ($generateThumbnails && $category === 'Image' && !$fileInfo->isDir()) {
-                // $fileId and $existingThumbnailPath are already set by the new logic above
-                // No need for the internal if/elseif ($rowCount === 1) block anymore
-
                 if ($fileId) {
                     if (!empty($existingThumbnailPath) && file_exists(__DIR__ . '/' . $existingThumbnailPath)) {
                         if ($debugMode) {
-                            echo " (Thumb exists)";
+                            echo "\nDEBUG: Thumbnail already exists.";
                         }
                     } else {
+                        if ($debugMode) {
+                            echo "\nDEBUG: Generating thumbnail...";
+                        }
                         $thumbnailRelPath = getThumbnailPath($fileId);
                         if (!empty($thumbnailRelPath)) {
                             $thumbDestination = __DIR__ . '/' . $thumbnailRelPath;
@@ -1150,12 +1171,12 @@ if (!$smartOnly) {
                                 $stats['thumbnails_created']++;
                                 echo " (Thumb ID: {$fileId})";
                                 if ($debugMode) {
-                                    echo " DEBUG: Thumbnail created for {$relativePath} with ID {$fileId}";
+                                    echo "\nDEBUG: Thumbnail created successfully.";
                                 }
                             } else {
                                 $stats['thumbnails_failed']++;
                                 if ($debugMode) {
-                                    echo " DEBUG: Thumbnail creation failed for {$relativePath}";
+                                    echo "\nDEBUG: Thumbnail creation failed.";
                                 }
                             }
                             if ($safeDelayUs > 0) usleep($safeDelayUs);
