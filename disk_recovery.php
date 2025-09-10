@@ -145,6 +145,13 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
             'output_type' => 'blob',
             'description' => 'GPT partition table backup. This is a critical backup of the partition scheme.',
         ],
+        // MISSING: Backup of secondary GPT table at end of disk
+        [
+            'tool' => 'sgdisk',
+            'command' => "sgdisk --print " . escapeshellarg("$deviceForSerial"),
+            'output_type' => 'text',
+            'description' => 'Complete GPT information including secondary table location'
+        ],
         [
             'tool' => 'dd',
             'command' => "dd if=". escapeshellarg("$deviceForSerial") . " bs=1024 count=64",
@@ -252,7 +259,7 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
     echo "  > Preparing to store recovery data in the database.\n";
     // Prepare the SQL statement for inserting recovery data.
     $stmt = $pdo->prepare(
-        "INSERT INTO st_recovery (drive_id, scan_id, tool, command, output_type, output_data, output_text, description, success, error_message, return_code) \n         VALUES (:drive_id, :scan_id, :tool, :command, :output_type, :output_data, :output_text, :description, :success, :error_message, :return_code)"
+        "INSERT INTO st_recovery (drive_id, scan_id, tool, command, output_type, output_data, output_text, description, success, error_message, return_code, execution_time, file_size, checksum) \n         VALUES (:drive_id, :scan_id, :tool, :command, :output_type, :output_data, :output_text, :description, :success, :error_message, :return_code, :execution_time, :file_size, :checksum)"
     );
 
     // Start database transaction
@@ -263,13 +270,20 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
         foreach ($recoveryData as $data) {
             echo "    > Executing command: {" . $data['command'] . "}\n";
             // Execute the command using the new robust function.
+            $start_time = microtime(true);
             $result = execute_recovery_command($data['command']);
+            $end_time = microtime(true);
+            $execution_time = round($end_time - $start_time, 4);
 
             // Determine which column to store the output in.
             $output_data = null;
             $output_text = null;
+            $file_size = null;
+            $checksum = null;
             if ($data['output_type'] === 'blob') {
                 $output_data = $result['output'];
+                $file_size = strlen($output_data);
+                $checksum = hash('sha256', $output_data);
             } else {
                 $output_text = $result['output'];
             }
@@ -287,6 +301,9 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
                 'success' => $result['success'],
                 'error_message' => $result['error'],
                 'return_code' => $result['return_code'],
+                'execution_time' => $execution_time,
+                'file_size' => $file_size,
+                'checksum' => $checksum,
             ]);
 
             if ($result['success']) {
