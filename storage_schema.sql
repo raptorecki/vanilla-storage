@@ -93,7 +93,7 @@ CREATE TABLE `st_files` (
   KEY `fk_last_scan` (`last_scan_id`),
   CONSTRAINT `fk_last_scan` FOREIGN KEY (`last_scan_id`) REFERENCES `st_scans` (`scan_id`) ON DELETE SET NULL,
   CONSTRAINT `st_files_drive_id_fk` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=1742150 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1746446 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -117,6 +117,9 @@ CREATE TABLE `st_recovery` (
   `success` tinyint(1) DEFAULT NULL,
   `error_message` text DEFAULT NULL,
   `return_code` int(11) DEFAULT NULL,
+  `execution_time` decimal(10,4) DEFAULT NULL COMMENT 'Execution time of the command in seconds',
+  `file_size` bigint(20) DEFAULT NULL COMMENT 'Size of the output_data in bytes (for blob types)',
+  `checksum` varchar(64) DEFAULT NULL COMMENT 'SHA256 checksum of the output_data (for blob types)',
   PRIMARY KEY (`recovery_id`),
   KEY `idx_drive_id` (`drive_id`),
   KEY `idx_scan_id` (`scan_id`),
@@ -197,4 +200,4 @@ CREATE TABLE `st_version` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-09-10  2:55:30
+-- Dump completed on 2025-09-10  3:11:35

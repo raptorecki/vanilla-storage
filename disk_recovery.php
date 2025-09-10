@@ -5,6 +5,31 @@
 // It performs a series of read-only operations to back up partition tables and file system metadata.
 // All operations are non-destructive and do not modify the drive in any way.
 //
+//
+// st_recovery Table Information:
+// This table stores critical disk recovery information collected from storage drives.
+// Each row represents the result of a specific read-only operation performed to back up
+// partition tables and file system metadata.
+//
+// Columns:
+// - recovery_id: Unique identifier for each recovery record (auto-incrementing primary key).
+// - drive_id: The ID of the drive to which this recovery data belongs (links to st_drives).
+// - scan_id: The ID of the scan operation during which this recovery data was collected (links to st_scans).
+// - created_at: Timestamp when this recovery record was created.
+// - tool: The name of the command-line tool used (e.g., sgdisk, dd, ntfsinfo).
+// - command: The exact shell command that was executed.
+// - output_type: Specifies the format of the command's output ('blob' for binary, 'text' for human-readable).
+// - output_data: Stores the binary output of the command, if output_type is 'blob'.
+// - output_text: Stores the textual output of the command, if output_type is 'text'.
+// - description: A brief explanation of the command's purpose.
+// - success: Boolean (0 or 1) indicating whether the command executed successfully.
+// - error_message: Any error messages returned by the command.
+// - return_code: The exit code of the executed command.
+// - execution_time: Execution time of the command in seconds.
+// - file_size: Size of the output_data in bytes (for blob types).
+// - checksum: SHA256 checksum of the output_data (for blob types).
+//
+
 // The script will perform the following actions:
 // 1. Back up the GPT partition table using sgdisk.
 // 2. Back up the Extended Boot Sector (first 64KB) using dd.
