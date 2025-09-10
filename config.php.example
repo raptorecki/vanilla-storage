@@ -14,4 +14,9 @@ return [
     // This can help prevent I/O overload on slower drives or USB connections.
     // 1000000 microseconds = 1 second. Default: 0 (no delay).
     'safe_delay_us' => 0,
+    
+    // Optional: Enable or disable badblock scan during disk recovery.
+    // Setting to true will run a non-destructive read-only badblock scan.
+    // This scan can take a significant amount of time on large drives.
+    'run_badblock_scan' => false,
 ];
