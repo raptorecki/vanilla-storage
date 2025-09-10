@@ -60,6 +60,12 @@ function execute_recovery_command($command, $timeout = 300) {
         usleep(100000); // 0.1 second
     }
 
+    // IMPROVEMENT: Add process termination on timeout
+    if ((time() - $start_time) >= $timeout) {
+        proc_terminate($process);
+        $error .= "\nCommand timed out after {" . $timeout . "} seconds";
+    }
+
     // Close pipes to prevent resource leaks
     fclose($pipes[0]);
     fclose($pipes[1]);
@@ -125,7 +131,12 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
     }
 
     // Check required tools availability
-    $requiredTools = ['sgdisk', 'dd', 'fdisk', 'ntfsinfo', 'ntfsclone', 'lsblk', 'testdisk', 'dumpe2fs', 'debugfs', 'fsck.fat', 'ntfssecaudit'];
+    $requiredTools = ['sgdisk', 'dd', 'fdisk', 'ntfsinfo', 'ntfsclone', 'lsblk', 
+    'testdisk', 'dumpe2fs', 'debugfs', 'fsck.fat', 'ntfssecaudit',
+    'ntfsfix',    // For NTFS consistency checks
+    'fsck.ext4',  // For ext filesystem checks  
+    'hexdump'     // For enhanced MBR analysis (optional)
+];
     // Conditionally add badblocks to required tools
     if (isset($config['run_badblock_scan']) && $config['run_badblock_scan'] === true) {
         $requiredTools[] = 'badblocks';
@@ -159,6 +170,12 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
             'description' => 'Extended boot sector backup (first 64KB). This captures critical boot information.',
         ],
         [
+            'tool' => 'hexdump',
+            'command' => "dd if=" . escapeshellarg("$deviceForSerial") . " bs=512 count=1 2>/dev/null | hexdump -C",
+            'output_type' => 'text',
+            'description' => 'MBR hexadecimal dump for detailed boot sector analysis'
+        ],
+        [
             'tool' => 'fdisk',
             'command' => "fdisk -l " . escapeshellarg("$deviceForSerial"),
             'output_type' => 'text',
@@ -167,9 +184,9 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
         // Added TestDisk functionality as per analysis
         [
             'tool' => 'testdisk',
-            'command' => "testdisk /log /list " . escapeshellarg("$deviceForSerial"),
+            'command' => "cd /tmp && testdisk /log /list " . escapeshellarg("$deviceForSerial") . " > /dev/null 2>&1 && cat testdisk.log && rm -f testdisk.log",
             'output_type' => 'text',
-            'description' => 'TestDisk partition analysis and structure discovery. Logs to testdisk.log in the current directory.',
+            'description' => 'TestDisk partition analysis and structure discovery. Output captured from testdisk.log.',
         ],
     ];
 
@@ -177,9 +194,9 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
     if (isset($config['run_badblock_scan']) && $config['run_badblock_scan'] === true) {
         $recoveryData[] = [
             'tool' => 'badblocks',
-            'command' => "badblocks -v -n " . escapeshellarg("$deviceForSerial"),
+            'command' => "badblocks -v -n -c 1024 -e 1000 " . escapeshellarg("$deviceForSerial"),
             'output_type' => 'text',
-            'description' => 'Bad sector analysis (non-destructive read-only scan).',
+            'description' => 'Bad sector analysis (non-destructive read-only scan). Optimized for performance with sampling.',
         ];
     }
 
