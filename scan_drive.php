@@ -7,7 +7,7 @@
  * and update drive-specific information like model number, serial, and filesystem type.
  *
  * Usage:
- * php scan_drive.php [--no-md5] [--no-drive-info-update] [--no-thumbnails] [--no-exif] [--no-filetype] [--smart-only] <drive_id> <partition_number> <mount_point>
+ * php scan_drive.php [--no-md5] [--no-drive-info-update] [--no-thumbnails] [--no-exif] [--no-filetype] [--smart-only] [--no-disk-recovery] <drive_id> <partition_number> <mount_point>
  *
  * Arguments:
  *   <drive_id>          : The integer ID of the drive as stored in the `st_drives` table.
@@ -22,6 +22,7 @@
  *   --no-exif           : Do not use exiftool to scan files.
  *   --no-filetype       : Do not use 'file' command to determine file type.
  *   --smart-only        : Only retrieves and saves smartctl data for the drive, skipping file scanning.
+ *   --no-disk-recovery  : Skips the disk recovery data collection and remount attempts.
  *   --safe-delay <microseconds> : Introduces a delay (in microseconds) between I/O operations (exiftool, file command, MD5, thumbnail generation). This can help prevent I/O overload.
  *
  * Examples:
@@ -114,6 +115,7 @@ $debugMode = false; // New debug flag
 $smartOnly = false; // New flag for smartctl only scan
 $useExiftool = true;
 $useFiletype = true;
+$skipDiskRecovery = false; // New flag to skip disk recovery
 $safeDelayUs = 0; // Default value, will be overridden by config or CLI arg
 
 $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_number> <mount_point>\n" .
@@ -128,6 +130,7 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
     "  --debug                 Enable verbose debug output.\n" .
     "  --smart-only            Only retrieve and save smartctl data, skipping file scanning.\n" .
+    "  --no-disk-recovery      Skip the disk recovery data collection and remount attempts.\n" .
     "  --safe-delay <microseconds> Introduce a delay between I/O operations (e.g., 100000 for 0.1 seconds).\n" .
     "  --help                  Display this help message.\n" .
     "  --version               Display the application version.\n";
@@ -166,6 +169,9 @@ while (isset($args[0]) && strpos($args[0], '--') === 0) {
             break;
         case '--smart-only':
             $smartOnly = true;
+            break;
+        case '--no-disk-recovery':
+            $skipDiskRecovery = true;
             break;
         case '--safe-delay':
             if (!isset($args[0]) || !is_numeric($args[0])) {
@@ -426,7 +432,7 @@ try {
     }
 
     // --- Collect recovery data ---
-    if (!$smartOnly) {
+    if (!$smartOnly && !$skipDiskRecovery) {
         collect_recovery_data($pdo, $driveId, $scanId, $deviceForSerial);
     }
 
