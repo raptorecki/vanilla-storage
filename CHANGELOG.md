@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.23] - 2025-09-10
+
+### Changed
+- `disk_recovery.php`: Added detailed comments and increased verbosity to the script. The script now clearly lists the actions it performs and emphasizes that all operations are read-only and non-destructive.
+
 ## [1.1.22] - 2025-09-10
 
 ### Added
@@ -112,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Corrected a flaw in command-line argument parsing that caused flags like `--no-filetype` and `--no-exif` to be ignored.
   - Hardened the script by adding validation for the `memory_limit` value in the config.
   - Improved handling of `--help` and `--version` flags to ensure they are processed correctly.
-  - Fixed a potential notice by initializing the `$GLOBALS['current_scanned_path']` variable.
+  - Fixed a potential notice by initializing the `$GLOBALS["current_scanned_path"]` variable.
   - Added a more explicit check for the `--no-exif` flag in the metadata extraction logic.
   - Removed conflicting logic for the `--use-external-thumb-gen` flag to prevent unintended side effects.
 
@@ -197,7 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.17] - 2025-08-25
 
 ### Fixed
-- Corrected `rowCount()` logic in `scan_drive.php` for `ON DUPLICATE KEY UPDATE` to accurately track added/updated files and ensure correct `fileId` retrieval for thumbnail generation.
+- Corrected `rowCount()` logic in `scan_drive.php` for `ON DUPLICATE KEY UPDATE` to accurately track added/updated files and and ensure correct `fileId` retrieval for thumbnail generation.
 
 ## [1.0.16] - 2025-08-24
 
