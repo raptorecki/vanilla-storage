@@ -22,7 +22,7 @@
  *   --no-exif           : Do not use exiftool to scan files.
  *   --no-filetype       : Do not use 'file' command to determine file type.
  *   --smart-only        : Only retrieves and saves smartctl data for the drive, skipping file scanning.
- *   --no-disk-recovery  : Skips the disk recovery data collection and remount attempts.
+ *   --with-disk-recovery : Enables the disk recovery data collection and remount attempts.
  *   --safe-delay <microseconds> : Introduces a delay (in microseconds) between I/O operations (exiftool, file command, MD5, thumbnail generation). This can help prevent I/O overload.
  *
  * Examples:
@@ -115,7 +115,7 @@ $debugMode = false; // New debug flag
 $smartOnly = false; // New flag for smartctl only scan
 $useExiftool = true;
 $useFiletype = true;
-$skipDiskRecovery = false; // New flag to skip disk recovery
+$withDiskRecovery = false; // New flag to enable disk recovery
 $safeDelayUs = 0; // Default value, will be overridden by config or CLI arg
 
 $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_number> <mount_point>\n" .
@@ -130,7 +130,7 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --skip-existing         Skip files that already exist in the database (for adding new files).\n" .
     "  --debug                 Enable verbose debug output.\n" .
     "  --smart-only            Only retrieve and save smartctl data, skipping file scanning.\n" .
-    "  --no-disk-recovery      Skip the disk recovery data collection and remount attempts.\n" .
+    "  --with-disk-recovery    Enable the disk recovery data collection and remount attempts.\n" .
     "  --safe-delay <microseconds> Introduce a delay between I/O operations (e.g., 100000 for 0.1 seconds).\n" .
     "  --help                  Display this help message.\n" .
     "  --version               Display the application version.\n";
@@ -170,8 +170,8 @@ while (isset($args[0]) && strpos($args[0], '--') === 0) {
         case '--smart-only':
             $smartOnly = true;
             break;
-        case '--no-disk-recovery':
-            $skipDiskRecovery = true;
+        case '--with-disk-recovery':
+            $withDiskRecovery = true;
             break;
         case '--safe-delay':
             if (!isset($args[0]) || !is_numeric($args[0])) {
@@ -431,9 +431,49 @@ try {
         }
     }
 
-    // --- Collect recovery data ---
-    if (!$smartOnly && !$skipDiskRecovery) {
-        collect_recovery_data($pdo, $driveId, $scanId, $deviceForSerial);
+    // --- Scan Initialization and Recovery Data ---
+    if (!$smartOnly) {
+        if ($resumeScan) {
+            echo "Attempting to resume scan for drive ID {$driveId}...\n";
+            $stmt = $pdo->prepare("SELECT * FROM st_scans WHERE drive_id = ? AND status = 'interrupted' ORDER BY scan_date DESC LIMIT 1");
+            $stmt->execute([$driveId]);
+            $lastScan = $stmt->fetch();
+
+            if ($lastScan) {
+                $scanId = $lastScan['scan_id'];
+                $lastScannedPath = $lastScan['last_scanned_path'];
+                $stats['scanned'] = $lastScan['total_items_scanned'];
+                $stats['added'] = $lastScan['new_files_added'];
+                $stats['updated'] = $lastScan['existing_files_updated'];
+                $stats['deleted'] = $lastScan['files_marked_deleted'];
+                $stats['skipped'] = $lastScan['files_skipped'];
+                $stats['thumbnails_created'] = $lastScan['thumbnails_created'];
+                $stats['thumbnails_failed'] = $lastScan['thumbnail_creations_failed'];
+
+                echo "  > Resuming scan_id: {$scanId}\n";
+                echo "  > Starting from path: " . ($lastScannedPath ?: 'beginning') . "\n";
+
+                $updateStatusStmt = $pdo->prepare("UPDATE st_scans SET status = 'running' WHERE scan_id = ?");
+                $updateStatusStmt->execute([$scanId]);
+            } else {
+                echo "  > No interrupted scan found for drive ID {$driveId}. Starting a new scan.\n";
+                $resumeScan = false;
+            }
+        }
+
+        if (!$resumeScan) {
+            $insertScanStmt = $pdo->prepare(
+                "INSERT INTO st_scans (drive_id, scan_date, status) VALUES (?, NOW(), 'running')"
+            );
+            $insertScanStmt->execute([$driveId]);
+            $scanId = $pdo->lastInsertId();
+            echo "Starting new scan (scan_id: {$scanId}) for drive_id: {$driveId} at '{$mountPoint}'...\n";
+        }
+
+        // --- Collect recovery data ---
+        if ($withDiskRecovery) {
+            collect_recovery_data($pdo, $driveId, $scanId, $deviceForSerial, $config);
+        }
     }
 
 } catch (Exception $e) {
@@ -441,46 +481,10 @@ try {
     echo "Error during drive verification. Check logs for details.\n";
     $GLOBALS['interrupted'] = true;
     exit(1);
-}    
+}
 
 // --- Full Scan Logic (only if --smart-only is NOT set) ---
 if (!$smartOnly) {
-    if ($resumeScan) {
-        echo "Attempting to resume scan for drive ID {$driveId}...\n";
-        $stmt = $pdo->prepare("SELECT * FROM st_scans WHERE drive_id = ? AND status = 'interrupted' ORDER BY scan_date DESC LIMIT 1");
-        $stmt->execute([$driveId]);
-        $lastScan = $stmt->fetch();
-
-        if ($lastScan) {
-            $scanId = $lastScan['scan_id'];
-            $lastScannedPath = $lastScan['last_scanned_path'];
-            $stats['scanned'] = $lastScan['total_items_scanned'];
-            $stats['added'] = $lastScan['new_files_added'];
-            $stats['updated'] = $lastScan['existing_files_updated'];
-            $stats['deleted'] = $lastScan['files_marked_deleted'];
-            $stats['skipped'] = $lastScan['files_skipped'];
-            $stats['thumbnails_created'] = $lastScan['thumbnails_created'];
-            $stats['thumbnails_failed'] = $lastScan['thumbnail_creations_failed'];
-
-            echo "  > Resuming scan_id: {$scanId}\n";
-            echo "  > Starting from path: " . ($lastScannedPath ?: 'beginning') . "\n";
-            
-            $updateStatusStmt = $pdo->prepare("UPDATE st_scans SET status = 'running' WHERE scan_id = ?");
-            $updateStatusStmt->execute([$scanId]);
-        } else {
-            echo "  > No interrupted scan found for drive ID {$driveId}. Starting a new scan.\n";
-            $resumeScan = false;
-        }
-    }
-
-    if (!$resumeScan) {
-        $insertScanStmt = $pdo->prepare(
-            "INSERT INTO st_scans (drive_id, scan_date, status) VALUES (?, NOW(), 'running')"
-        );
-        $insertScanStmt->execute([$driveId]);
-        $scanId = $pdo->lastInsertId();
-        echo "Starting new scan (scan_id: {$scanId}) for drive_id: {$driveId} at '{$mountPoint}'...\n";
-    }
     $GLOBALS['scanId'] = $scanId; // Set global scanId for shutdown function
 
     $startTime = microtime(true);

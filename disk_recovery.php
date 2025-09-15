@@ -71,35 +71,63 @@ function execute_recovery_command($command, $timeout = 300) {
 
     $process = proc_open($command, $descriptors, $pipes);
     if (!is_resource($process)) {
-        throw new Exception("Failed to execute command: {" . $command . "}");
+        throw new Exception("Failed to execute command: {$command}");
     }
 
-    // Set timeout
-    $start_time = time();
+    // Close stdin since we don't need it
+    fclose($pipes[0]);
+    
+    // Set pipes to non-blocking
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+
     $output = '';
     $error = '';
+    $start_time = time();
 
-    while (proc_get_status($process)['running'] && (time() - $start_time) < $timeout) {
-        $output .= stream_get_contents($pipes[1]);
-        $error .= stream_get_contents($pipes[2]);
-        usleep(100000); // 0.1 second
-    }
+    // Loop until process is no longer running or timeout occurs
+    do {
+        // Check for timeout
+        if (time() - $start_time > $timeout) {
+            proc_terminate($process, SIGKILL);
+            $error .= "\nCommand timed out after {$timeout} seconds";
+            break;
+        }
 
-    // IMPROVEMENT: Add process termination on timeout
-    if ((time() - $start_time) >= $timeout) {
-        proc_terminate($process);
-        $error .= "\nCommand timed out after {" . $timeout . "} seconds";
-    }
+        // Read available data from pipes
+        $stdout_chunk = stream_get_contents($pipes[1]);
+        $stderr_chunk = stream_get_contents($pipes[2]);
+        
+        if ($stdout_chunk !== false) {
+            $output .= $stdout_chunk;
+        }
+        if ($stderr_chunk !== false) {
+            $error .= $stderr_chunk;
+        }
 
-    // Close pipes to prevent resource leaks
-    fclose($pipes[0]);
+        // Get process status
+        $status = proc_get_status($process);
+        
+        // Small sleep to prevent excessive CPU usage
+        if ($status['running']) {
+            usleep(100000); // 0.1 seconds
+        }
+        
+    } while ($status['running']);
+
+    // Read any remaining output
+    $output .= stream_get_contents($pipes[1]);
+    $error .= stream_get_contents($pipes[2]);
+
+    // Close pipes
     fclose($pipes[1]);
     fclose($pipes[2]);
 
+    // Get final exit code
     $return_value = proc_close($process);
 
     return [
-        'success' => $return_value === 0,
+        'success' => ($return_value === 0) ? 1 : 0,
         'output' => $output,
         'error' => $error,
         'return_code' => $return_value
@@ -116,12 +144,17 @@ function get_partitions($device) {
     $partitions = [];
 
     // Use lsblk for reliable partition detection
-    $output = shell_exec("lsblk -rno NAME,TYPE,FSTYPE,SIZE,MOUNTPOINT " . escapeshellarg($device));
+    $output = shell_exec("lsblk -rno NAME,TYPE,FSTYPE,SIZE,MOUNTPOINT " . escapeshellarg($device) . " 2>/dev/null");
+    
+    if (empty($output)) {
+        return $partitions;
+    }
+    
     $lines = explode("\n", trim($output));
 
     foreach ($lines as $line) {
-        $parts = preg_split('/\s+/', $line);
-        if (count($parts) >= 3 && $parts[1] === 'part') {
+        $parts = preg_split('/\s+/', trim($line));
+        if (count($parts) >= 2 && $parts[1] === 'part') {
             $partitions[] = [
                 'device' => "/dev/" . $parts[0],
                 'fstype' => $parts[2] ?? '',
@@ -141,167 +174,190 @@ function get_partitions($device) {
  * @param int $driveId The ID of the drive being scanned.
  * @param int $scanId The ID of the current scan.
  * @param string $deviceForSerial The device path (e.g., /dev/sda).
+ * @param array $config Configuration array.
  * @throws Exception If the device is not accessible or a required tool is missing.
  */
-function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $deviceForSerial) {
+function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $deviceForSerial, array $config) {
     echo "  > Starting disk recovery data collection process.\n";
     echo "  > All operations are read-only and non-destructive.\n";
 
-    // Load configuration
-    $config = require_once __DIR__ . '/config.php';
-
     // Validate device exists and is accessible
     if (!file_exists($deviceForSerial) || !is_readable($deviceForSerial)) {
-        throw new Exception("Device {" . $deviceForSerial . "} is not accessible or readable.");
+        throw new Exception("Device {$deviceForSerial} is not accessible or readable.");
     }
 
-    // Check required tools availability
-    $requiredTools = ['sgdisk', 'dd', 'fdisk', 'ntfsinfo', 'ntfsclone', 'lsblk', 
-    'testdisk', 'dumpe2fs', 'debugfs', 'fsck.fat', 'ntfssecaudit',
-    'ntfsfix',    // For NTFS consistency checks
-    'fsck.ext4',  // For ext filesystem checks  
-    'hexdump'     // For enhanced MBR analysis (optional)
-];
-    // Conditionally add badblocks to required tools
+    // Check required tools availability - make tools optional to avoid complete failure
+    $availableTools = [];
+    $potentialTools = ['sgdisk', 'dd', 'fdisk', 'ntfsinfo', 'ntfsclone', 'lsblk', 
+        'testdisk', 'dumpe2fs', 'debugfs', 'fsck.fat', 'ntfssecaudit',
+        'ntfsfix', 'fsck.ext4', 'hexdump'];
+    
+    // Conditionally add badblocks
     if (isset($config['run_badblock_scan']) && $config['run_badblock_scan'] === true) {
-        $requiredTools[] = 'badblocks';
+        $potentialTools[] = 'badblocks';
     }
 
-    foreach ($requiredTools as $tool) {
-        if (!command_exists($tool)) {
-            throw new Exception("Required tool '{$tool}' is not installed or not in PATH.");
+    foreach ($potentialTools as $tool) {
+        if (command_exists($tool)) {
+            $availableTools[] = $tool;
+        } else {
+            echo "  > Warning: Tool '{$tool}' is not available and will be skipped.\n";
         }
     }
 
+    if (empty($availableTools)) {
+        throw new Exception("No recovery tools are available on this system.");
+    }
+
     // Define the sequence of recovery commands to be executed.
-    $recoveryData = [
-        [
+    $recoveryData = [];
+    
+    // Only add commands for tools that are available
+    if (in_array('sgdisk', $availableTools)) {
+        $recoveryData[] = [
             'tool' => 'sgdisk',
-            'command' => "sgdisk --backup=- " . escapeshellarg("$deviceForSerial"),
+            'command' => "sgdisk --backup=- " . escapeshellarg($deviceForSerial) . " 2>/dev/null",
             'output_type' => 'blob',
             'description' => 'GPT partition table backup. This is a critical backup of the partition scheme.',
-        ],
-        // MISSING: Backup of secondary GPT table at end of disk
-        [
+        ];
+        $recoveryData[] = [
             'tool' => 'sgdisk',
-            'command' => "sgdisk --print " . escapeshellarg("$deviceForSerial"),
+            'command' => "sgdisk --print " . escapeshellarg($deviceForSerial) . " 2>/dev/null",
             'output_type' => 'text',
             'description' => 'Complete GPT information including secondary table location'
-        ],
-        [
+        ];
+    }
+    
+    if (in_array('dd', $availableTools)) {
+        $recoveryData[] = [
             'tool' => 'dd',
-            'command' => "dd if=". escapeshellarg("$deviceForSerial") . " bs=1024 count=64",
+            'command' => "dd if=" . escapeshellarg($deviceForSerial) . " bs=1024 count=64 2>/dev/null",
             'output_type' => 'blob',
             'description' => 'Extended boot sector backup (first 64KB). This captures critical boot information.',
-        ],
-        [
+        ];
+    }
+    
+    if (in_array('hexdump', $availableTools) && in_array('dd', $availableTools)) {
+        $recoveryData[] = [
             'tool' => 'hexdump',
-            'command' => "dd if=" . escapeshellarg("$deviceForSerial") . " bs=512 count=1 2>/dev/null | hexdump -C",
+            'command' => "dd if=" . escapeshellarg($deviceForSerial) . " bs=512 count=1 2>/dev/null | hexdump -C",
             'output_type' => 'text',
             'description' => 'MBR hexadecimal dump for detailed boot sector analysis'
-        ],
-        [
+        ];
+    }
+    
+    if (in_array('fdisk', $availableTools)) {
+        $recoveryData[] = [
             'tool' => 'fdisk',
-            'command' => "fdisk -l " . escapeshellarg("$deviceForSerial"),
+            'command' => "fdisk -l " . escapeshellarg($deviceForSerial) . " 2>/dev/null",
             'output_type' => 'text',
             'description' => 'Detailed partition table information using fdisk.',
-        ],
-        // Added TestDisk functionality as per analysis
-        [
+        ];
+    }
+    
+    if (in_array('testdisk', $availableTools)) {
+        $recoveryData[] = [
             'tool' => 'testdisk',
-            'command' => "cd /tmp && testdisk /log /list " . escapeshellarg("$deviceForSerial") . " > /dev/null 2>&1 && cat testdisk.log && rm -f testdisk.log",
+            'command' => "cd /tmp && testdisk /log /list " . escapeshellarg($deviceForSerial) . " >/dev/null 2>&1 && cat testdisk.log 2>/dev/null && rm -f testdisk.log",
             'output_type' => 'text',
             'description' => 'TestDisk partition analysis and structure discovery. Output captured from testdisk.log.',
-        ],
-    ];
+        ];
+    }
 
     // Conditionally add badblocks scan
-    if (isset($config['run_badblock_scan']) && $config['run_badblock_scan'] === true) {
+    if (isset($config['run_badblock_scan']) && $config['run_badblock_scan'] === true && in_array('badblocks', $availableTools)) {
         $recoveryData[] = [
             'tool' => 'badblocks',
-            'command' => "badblocks -v -n -c 1024 -e 1000 " . escapeshellarg("$deviceForSerial"),
+            'command' => "badblocks -v -n -c 1024 -e 1000 " . escapeshellarg($deviceForSerial) . " 2>/dev/null",
             'output_type' => 'text',
             'description' => 'Bad sector analysis (non-destructive read-only scan). Optimized for performance with sampling.',
         ];
     }
 
-
-    echo "  > Searching for partitions on {" . $deviceForSerial . "}...\n";
+    echo "  > Searching for partitions on {$deviceForSerial}...\n";
     // Find all partitions on the specified device using the new helper function.
     $partitions = get_partitions($deviceForSerial);
     foreach ($partitions as $partitionInfo) {
         $partition = $partitionInfo['device'];
         $fsType = $partitionInfo['fstype'];
 
-        echo "    > Found partition: {" . $partition . "}\n";
-        echo "      - Filesystem type: {" . $fsType . "}\n";
+        echo "    > Found partition: {$partition}\n";
+        echo "      - Filesystem type: {$fsType}\n";
 
         // If the partition is NTFS, collect additional metadata.
         if ($fsType === 'ntfs') {
             echo "      - NTFS partition found. Collecting additional metadata.\n";
-            $recoveryData[] = [
-                'tool' => 'ntfsinfo',
-                'command' => "ntfsinfo -m " . escapeshellarg("$partition"),
-                'output_type' => 'text',
-                'description' => "NTFS volume information for {" . $partition . "}. Contains detailed stats about the NTFS volume.",
-            ];
-            $recoveryData[] = [
-                'tool' => 'ntfsclone',
-                'command' => "ntfsclone --metadata -o - " . escapeshellarg("$partition"),
-                'output_type' => 'blob',
-                'description' => "NTFS MFT backup for {" . $partition . "}. This is a critical backup of the Master File Table.",
-            ];
-            // Added NTFS Security descriptor analysis
-            $recoveryData[] = [
-                'tool' => 'ntfssecaudit',
-                'command' => "ntfssecaudit " . escapeshellarg("$partition"),
-                'output_type' => 'text',
-                'description' => "NTFS security audit for {" . $partition . "} - ACL and security descriptor analysis."
-            ];
-            // Added NTFS file system journal
-            $recoveryData[] = [
-                'tool' => 'ntfsinfo',
-                'command' => "ntfsinfo -j " . escapeshellarg("$partition"),
-                'output_type' => 'text',
-                'description' => "NTFS journal information for {" . $partition . "}"
-            ];
-            // Added NTFS Master File Table detailed dump
-            $recoveryData[] = [
-                'tool' => 'ntfsinfo',
-                'command' => "ntfsinfo -F " . escapeshellarg("$partition"),
-                'output_type' => 'text',
-                'description' => "NTFS detailed MFT analysis for {" . $partition . "}"
-            ];
+            
+            if (in_array('ntfsinfo', $availableTools)) {
+                $recoveryData[] = [
+                    'tool' => 'ntfsinfo',
+                    'command' => "ntfsinfo -m --force " . escapeshellarg($partition) . " 2>/dev/null",
+                    'output_type' => 'text',
+                    'description' => "NTFS volume information for {$partition}. Contains detailed stats about the NTFS volume.",
+                ];
+            }
+            
+            if (in_array('ntfsclone', $availableTools)) {
+                $recoveryData[] = [
+                    'tool' => 'ntfsclone',
+                    'command' => 'cd /tmp && tmpfile=$(mktemp) && ntfsclone --metadata --force -o "$tmpfile" ' . escapeshellarg($partition) . ' >/dev/null 2>&1 && cat "$tmpfile" 2>/dev/null && rm -f "$tmpfile"',
+                    'output_type' => 'blob',
+                    'description' => "NTFS MFT backup for {$partition}. This is a critical backup of the Master File Table.",
+                ];
+            }
+            
+            if (in_array('ntfssecaudit', $availableTools)) {
+                $recoveryData[] = [
+                    'tool' => 'ntfssecaudit',
+                    'command' => "ntfssecaudit " . escapeshellarg($partition) . " 2>/dev/null",
+                    'output_type' => 'text',
+                    'description' => "NTFS security audit for {$partition} - ACL and security descriptor analysis."
+                ];
+            }
         } else if (in_array($fsType, ['ext4', 'ext3', 'ext2'])) { // ext4/ext3/ext2 filesystem information
             echo "      - EXT filesystem found. Collecting additional metadata.\n";
-            $recoveryData[] = [
-                'tool' => 'dumpe2fs',
-                'command' => "dumpe2fs -h " . escapeshellarg("$partition"),
-                'output_type' => 'text',
-                'description' => "ext filesystem superblock information for {" . $partition . "}"
-            ];
-            // Backup journal for ext filesystems
-            $recoveryData[] = [
-                'tool' => 'debugfs',
-                'command' => "echo 'logdump -a' | debugfs " . escapeshellarg("$partition"),
-                'output_type' => 'text',
-                'description' => "ext filesystem journal dump for {" . $partition . "}"
-            ];
+            
+            if (in_array('dumpe2fs', $availableTools)) {
+                $recoveryData[] = [
+                    'tool' => 'dumpe2fs',
+                    'command' => "dumpe2fs -h " . escapeshellarg($partition) . " 2>/dev/null",
+                    'output_type' => 'text',
+                    'description' => "ext filesystem superblock information for {$partition}"
+                ];
+            }
+            
+            if (in_array('debugfs', $availableTools)) {
+                $recoveryData[] = [
+                    'tool' => 'debugfs',
+                    'command' => "echo 'logdump -a' | debugfs " . escapeshellarg($partition) . " 2>/dev/null",
+                    'output_type' => 'text',
+                    'description' => "ext filesystem journal dump for {$partition}"
+                ];
+            }
         } else if (in_array($fsType, ['vfat', 'exfat'])) { // FAT32/exFAT support
             echo "      - FAT/exFAT filesystem found. Collecting additional metadata.\n";
-            $recoveryData[] = [
-                'tool' => 'fsck.fat',
-                'command' => "fsck.fat -v -r " . escapeshellarg("$partition"),
-                'output_type' => 'text',
-                'description' => "FAT filesystem information for {" . $partition . "}"
-            ];
+            
+            if (in_array('fsck.fat', $availableTools)) {
+                $recoveryData[] = [
+                    'tool' => 'fsck.fat',
+                    'command' => "fsck.fat -v -r " . escapeshellarg($partition) . " 2>/dev/null",
+                    'output_type' => 'text',
+                    'description' => "FAT filesystem information for {$partition}"
+                ];
+            }
         }
+    }
+
+    if (empty($recoveryData)) {
+        echo "  > No recovery commands available to execute.\n";
+        return;
     }
 
     echo "  > Preparing to store recovery data in the database.\n";
     // Prepare the SQL statement for inserting recovery data.
     $stmt = $pdo->prepare(
-        "INSERT INTO st_recovery (drive_id, scan_id, tool, command, output_type, output_data, output_text, description, success, error_message, return_code, execution_time, file_size, checksum) \n         VALUES (:drive_id, :scan_id, :tool, :command, :output_type, :output_data, :output_text, :description, :success, :error_message, :return_code, :execution_time, :file_size, :checksum)"
+        "INSERT INTO st_recovery (drive_id, scan_id, tool, command, output_type, output_data, output_text, description, success, error_message, return_code, execution_time, file_size, checksum) 
+         VALUES (:drive_id, :scan_id, :tool, :command, :output_type, :output_data, :output_text, :description, :success, :error_message, :return_code, :execution_time, :file_size, :checksum)"
     );
 
     // Start database transaction
@@ -310,10 +366,10 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
     try {
         // Execute each command and store the output in the database.
         foreach ($recoveryData as $data) {
-            echo "    > Executing command: {" . $data['command'] . "}\n";
+            echo "    > Executing command: {$data['command']}\n";
             // Execute the command using the new robust function.
             $start_time = microtime(true);
-            $result = execute_recovery_command($data['command']);
+            $result = execute_recovery_command($data['command'], 60); // Reduced timeout to 60 seconds
             $end_time = microtime(true);
             $execution_time = round($end_time - $start_time, 4);
 
@@ -322,6 +378,7 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
             $output_text = null;
             $file_size = null;
             $checksum = null;
+            
             if ($data['output_type'] === 'blob') {
                 $output_data = $result['output'];
                 $file_size = strlen($output_data);
@@ -340,7 +397,7 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
                 'output_data' => $output_data,
                 'output_text' => $output_text,
                 'description' => $data['description'],
-                'success' => $result['success'],
+                'success' => (int)$result['success'],
                 'error_message' => $result['error'],
                 'return_code' => $result['return_code'],
                 'execution_time' => $execution_time,
@@ -350,9 +407,8 @@ function collect_recovery_data(PDO $pdo, int $driveId, int $scanId, string $devi
 
             if ($result['success']) {
                 echo "      - Command executed successfully. Data stored.\n";
-            }
-            else {
-                echo "      - Command failed (Return Code: {" . $result['return_code'] . "}). Error: {" . $result['error'] . "}. Data stored with error.\n";
+            } else {
+                echo "      - Command failed (Return Code: {$result['return_code']}). Error: {$result['error']}. Data stored with error.\n";
             }
         }
 
