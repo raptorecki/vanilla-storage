@@ -223,7 +223,7 @@ if (!is_dir($mountPoint)) {
 }
 
 // Validate read/write permissions for the mount point
-if (!is_readable($mountPoint) || !is_writable($mountPoint)) {
+if (!is_readable($mountPoint)) {
     echo "Error: Insufficient permissions to read from or write to mount point '{$mountPoint}'. Please ensure the script has appropriate read/write access.\n";
     exit(1);
 }
@@ -648,8 +648,13 @@ if (!$smartOnly) {
     class ExiftoolManager {
         private $proc;
         private $pipes;
+        private $maxOutputSize;
+        private $timeout;
 
-        public function __construct(string $exiftoolPath) {
+        public function __construct(string $exiftoolPath, int $maxOutputSize = 1048576, int $timeout = 30) {
+            $this->maxOutputSize = $maxOutputSize; // 1MB limit
+            $this->timeout = $timeout;
+            
             $descriptorSpec = [
                 0 => ["pipe", "r"],  // stdin
                 1 => ["pipe", "w"],  // stdout
@@ -657,39 +662,88 @@ if (!$smartOnly) {
             ];
 
             $command = sprintf('%s -charset filename=UTF8 -stay_open True -@ -', escapeshellarg($exiftoolPath));
-
+            
             $this->proc = proc_open($command, $descriptorSpec, $this->pipes);
 
             if (!is_resource($this->proc)) {
                 throw new Exception("Failed to open exiftool process.");
             }
+            
+            // Set non-blocking mode for stdout and stderr
+            stream_set_blocking($this->pipes[1], false);
+            stream_set_blocking($this->pipes[2], false);
         }
 
         public function getMetadata(string $filePath): ?array {
+            if (!is_resource($this->proc)) {
+                throw new Exception("ExifTool process is not running");
+            }
+
+            // Send command
             fwrite($this->pipes[0], "-G\n-s\n-json\n");
             fwrite($this->pipes[0], "$filePath\n");
             fwrite($this->pipes[0], "-execute\n");
+            fflush($this->pipes[0]);
 
             $output = '';
+            $startTime = microtime(true);
+            $outputSize = 0;
+
             while (true) {
-                $line = fgets($this->pipes[1]);
-                if ($line === false || trim($line) === '{ready}') {
+                // Check timeout
+                if (microtime(true) - $startTime > $this->timeout) {
+                    error_log("ExifTool timeout for file: $filePath");
+                    return null;
+                }
+
+                // Check output size limit
+                if ($outputSize > $this->maxOutputSize) {
+                    error_log("ExifTool output size limit exceeded for file: $filePath");
+                    return null;
+                }
+
+                $read = [$this->pipes[1]];
+                $write = null;
+                $except = null;
+                
+                // Use stream_select with timeout
+                $result = stream_select($read, $write, $except, 1, 0);
+                
+                if ($result === false) {
+                    error_log("Stream select failed for ExifTool");
+                    return null;
+                }
+                
+                if ($result === 0) {
+                    continue; // Timeout, try again
+                }
+
+                $line = fgets($this->pipes[1], 4096);
+                if ($line === false) {
+                    continue; // No data available
+                }
+
+                if (trim($line) === '{ready}') {
                     break;
                 }
+
                 $output .= $line;
+                $outputSize += strlen($line);
             }
 
             // Read any errors from stderr
-            stream_set_blocking($this->pipes[2], false);
-            $errorOutput = stream_get_contents($this->pipes[2]);
-            if (!empty($errorOutput)) {
-                log_error("Exiftool stderr for file {$filePath}: " . trim($errorOutput));
+            $errorOutput = '';
+            while (($errorLine = fgets($this->pipes[2], 4096)) !== false) {
+                $errorOutput .= $errorLine;
             }
-            stream_set_blocking($this->pipes[2], true);
+            
+            if (!empty($errorOutput)) {
+                error_log("Exiftool stderr for file $filePath: " . trim($errorOutput));
+            }
 
             $data = json_decode($output, true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($data)) {
-                return $data; // Return the full array
+                return $data;
             }
 
             return null;

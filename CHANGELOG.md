@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.29] - 2025-09-16
+
+### Fixed
+- `scan_drive.php`: Fixed script to only check for read permissions on mount points, allowing scanning of read-only mounted drives.
+
 ## [1.1.28] - 2025-09-16
 
 ### Changed
