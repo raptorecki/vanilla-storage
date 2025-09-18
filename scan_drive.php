@@ -1141,7 +1141,7 @@ if (!$smartOnly) {
                     $fileData = [
                         'drive_id' => $driveId, 'path' => $relativePath, 'path_hash' => hash('sha256', $relativePath),
                         'filename' => $fileInfo->getFilename(), 'size' => $fileInfo->isDir() ? 0 : $fileInfo->getSize(),
-                        'ctime' => date('Y-m-d H:i:s', $fileInfo->getCTime()), 'mtime' => date('Y-m-d H:i:s', $fileInfo->getMTime()),
+                        'ctime' => validateTimestampAndFormat($fileInfo->getCTime()), 'mtime' => validateTimestampAndFormat($fileInfo->getMTime()),
                         'media_format' => $metadata['format'], 'media_codec' => $metadata['codec'], 'media_resolution' => $metadata['resolution'],
                         'media_duration' => $metadata['duration'], 'exif_date_taken' => $metadata['exif_date_taken'],
                         'exif_camera_model' => $metadata['exif_camera_model'], 'file_category' => $fileInfo->isDir() ? 'Directory' : $category,

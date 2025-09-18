@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.30] - 2025-09-18
+
+### Fixed
+- `scan_drive.php`: The script will no longer crash when encountering a file with a corrupt or invalid modification/creation timestamp (e.g., a year far in the future). It now validates the timestamp and logs an error while setting the value to NULL in the database, allowing the scan to proceed.
+
 ## [1.1.29] - 2025-09-16
 
 ### Fixed
