@@ -608,6 +608,30 @@ if (!$smartOnly) {
     }
 
     /**
+     * Validates a Unix timestamp and formats it as a DATETIME string.
+     *
+     * @param int|null $timestamp The Unix timestamp.
+     * @return string|null The formatted date string ('Y-m-d H:i:s') or null if the timestamp is invalid.
+     */
+    function validateTimestampAndFormat(?int $timestamp): ?string
+    {
+        if ($timestamp === null || $timestamp <= 0) {
+            return null;
+        }
+
+        // Prevent issues with timestamps that are clearly out of a reasonable range.
+        // The valid range for a MySQL DATETIME is '1000-01-01 00:00:00' to '9999-12-31 23:59:59'.
+        // We'll check against a slightly more practical range.
+        $year = (int)date('Y', $timestamp);
+        if ($year < 1900 || $year > 9999) {
+            log_error("Invalid year '{$year}' detected for timestamp '{$timestamp}'. Returning null.");
+            return null;
+        }
+
+        return date('Y-m-d H:i:s', $timestamp);
+    }
+
+    /**
      * Extracts image metadata using native PHP functions.
      * @param string $filePath The full path to the image file.
      * @return array|null An array with metadata (format, resolution, exif_date_taken, exif_camera_model) or null on failure.
@@ -1138,10 +1162,31 @@ if (!$smartOnly) {
                         if ($safeDelayUs > 0) usleep($safeDelayUs);
                     }
 
+                    $rawMtime = null;
+                    $rawCtime = null;
+                    try {
+                        $rawMtime = $fileInfo->getMTime();
+                        $rawCtime = $fileInfo->getCTime();
+                    } catch (Exception $e) {
+                        log_error("Failed to get file time for '{$path}'. Error: " . $e->getMessage());
+                    }
+
+                    $mtime = validateTimestampAndFormat($rawMtime);
+                    $ctime = validateTimestampAndFormat($rawCtime);
+
+                    if ($mtime === null) {
+                        $mtime = '1970-01-01 00:00:01';
+                        log_error("mtime for file '{$path}' is null or invalid, using default time '{$mtime}'.");
+                    }
+                    if ($ctime === null) {
+                        $ctime = '1970-01-01 00:00:01';
+                        log_error("ctime for file '{$path}' is null or invalid, using default time '{$ctime}'.");
+                    }
+
                     $fileData = [
                         'drive_id' => $driveId, 'path' => $relativePath, 'path_hash' => hash('sha256', $relativePath),
                         'filename' => $fileInfo->getFilename(), 'size' => $fileInfo->isDir() ? 0 : $fileInfo->getSize(),
-                        'ctime' => date('Y-m-d H:i:s', $fileInfo->getCTime()), 'mtime' => date('Y-m-d H:i:s', $fileInfo->getMTime()),
+                        'ctime' => $ctime, 'mtime' => $mtime,
                         'media_format' => $metadata['format'], 'media_codec' => $metadata['codec'], 'media_resolution' => $metadata['resolution'],
                         'media_duration' => $metadata['duration'], 'exif_date_taken' => $metadata['exif_date_taken'],
                         'exif_camera_model' => $metadata['exif_camera_model'], 'file_category' => $fileInfo->isDir() ? 'Directory' : $category,
@@ -1152,7 +1197,7 @@ if (!$smartOnly) {
                     ];
 
                     if ($calculateMd5) {
-                        $currentMtime = $fileInfo->getMTime();
+                        $currentMtime = $rawMtime;
                         $currentSize = $fileInfo->getSize();
 
                         // Check if the file exists in the database and its mtime and size match
