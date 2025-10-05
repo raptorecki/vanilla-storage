@@ -24,6 +24,7 @@
  *   --smart-only        : Only retrieves and saves smartctl data for the drive, skipping file scanning.
  *   --with-disk-recovery : Enables the disk recovery data collection and remount attempts.
  *   --safe-delay <microseconds> : Introduces a delay (in microseconds) between I/O operations (exiftool, file command, MD5, thumbnail generation). This can help prevent I/O overload.
+ *   --no-hdparm         : Skips hdparm checks for drive serial and model numbers.
  *
  * Examples:
  *   php scan_drive.php 5 1 /mnt/my_external_drive
@@ -116,6 +117,7 @@ $smartOnly = false; // New flag for smartctl only scan
 $useExiftool = true;
 $useFiletype = true;
 $withDiskRecovery = false; // New flag to enable disk recovery
+$noHdAparm = false;
 $safeDelayUs = 0; // Default value, will be overridden by config or CLI arg
 
 $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_number> <mount_point>\n" .
@@ -132,6 +134,7 @@ $usage = "Usage: php " . basename(__FILE__) . " [options] <drive_id> <partition_
     "  --smart-only            Only retrieve and save smartctl data, skipping file scanning.\n" .
     "  --with-disk-recovery    Enable the disk recovery data collection and remount attempts.\n" .
     "  --safe-delay <microseconds> Introduce a delay between I/O operations (e.g., 100000 for 0.1 seconds).\n" .
+    "  --no-hdparm             Skip hdparm checks for drive serial and model numbers.\n" .
     "  --help                  Display this help message.\n" .
     "  --version               Display the application version.\n";
 
@@ -172,6 +175,9 @@ while (isset($args[0]) && strpos($args[0], '--') === 0) {
             break;
         case '--with-disk-recovery':
             $withDiskRecovery = true;
+            break;
+        case '--no-hdparm':
+            $noHdAparm = true;
             break;
         case '--safe-delay':
             if (!isset($args[0]) || !is_numeric($args[0])) {
@@ -303,28 +309,34 @@ try {
     }
 
     $physicalSerial = '';
-    if (strpos($deviceForSerial, '/dev/sd') === 0) {
-        echo "  > Querying serial number with hdparm...\n";
-        $hdparm_output = shell_exec("hdparm -I " . escapeshellarg($deviceForSerial) . " 2>/dev/null | grep 'Serial Number:'");
-        if (!empty($hdparm_output) && preg_match('/Serial Number:\s*(.*)/', $hdparm_output, $matches)) {
-            $physicalSerial = trim($matches[1]);
-        }
-    } else {
-        echo "  > Device '{$deviceForSerial}' is not a standard SATA device (/dev/sdX). Cannot use hdparm.\n";
-    }
-
-    if (empty($physicalSerial)) {
-        throw new Exception("Could not read serial number from device '{$deviceForSerial}' using hdparm. This can happen with virtual drives, some USB-to-SATA adapters, or if the user lacks permissions. Please ensure the drive has a readable serial number and the script has sufficient privileges (e.g., run with sudo).");
-    }
-    echo "  > Physical device serial: {$physicalSerial}\n";
-
     $physicalModel = '';
-    if (strpos($deviceForSerial, '/dev/sd') === 0) {
-        echo "  > Querying model number with hdparm...\n";
-        $hdparm_output = shell_exec("hdparm -I " . escapeshellarg($deviceForSerial) . " 2>/dev/null | grep 'Model Number:'");
-        if (!empty($hdparm_output) && preg_match('/Model Number:\s*(.*)/', $hdparm_output, $matches)) {
-            $physicalModel = trim($matches[1]);
+
+    if ($noHdAparm) {
+        echo "  > --no-hdparm flag is set. Skipping hdparm checks.\n";
+    } else {
+        if (strpos($deviceForSerial, '/dev/sd') === 0) {
+            echo "  > Querying serial number with hdparm...\n";
+            $hdparm_output = shell_exec("hdparm -I " . escapeshellarg($deviceForSerial) . " 2>/dev/null | grep 'Serial Number:'");
+            if (!empty($hdparm_output) && preg_match('/Serial Number:\s*(.*)/', $hdparm_output, $matches)) {
+                $physicalSerial = trim($matches[1]);
+            }
+
+            echo "  > Querying model number with hdparm...\n";
+            $hdparm_output = shell_exec("hdparm -I " . escapeshellarg($deviceForSerial) . " 2>/dev/null | grep 'Model Number:'");
+            if (!empty($hdparm_output) && preg_match('/Model Number:\s*(.*)/', $hdparm_output, $matches)) {
+                $physicalModel = trim($matches[1]);
+            }
+        } else {
+            echo "  > Device '{$deviceForSerial}' is not a standard SATA device (/dev/sdX). Cannot use hdparm.\n";
         }
+
+        if (empty($physicalSerial)) {
+            throw new Exception("Could not read serial number from device '{$deviceForSerial}' using hdparm. This can happen with virtual drives, some USB-to-SATA adapters, or if the user lacks permissions. Use --no-hdparm to skip this check if the drive is not supported.");
+        }
+    }
+
+    if (!empty($physicalSerial)) {
+        echo "  > Physical device serial: {$physicalSerial}\n";
     }
     if (!empty($physicalModel)) {
         echo "  > Physical device model: {$physicalModel}\n";
@@ -384,7 +396,9 @@ try {
     $dbFilesystemType = $driveFromDb['filesystem'];
     echo "  > Database serial for ID {$driveId}: {$dbSerial}\n";
 
-    if ($physicalSerial === $dbSerial) {
+    if ($noHdAparm) {
+        echo "  > Skipping serial number match because --no-hdparm is set.\n";
+    } elseif ($physicalSerial === $dbSerial) {
         echo "  > OK: Serial numbers match.\n\n";
     } else {
         echo "\n!! WARNING: SERIAL NUMBER MISMATCH !!\n";

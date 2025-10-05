@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.32] - 2025-10-05
+
+### Added
+- `scan_drive.php`: Added `--no-hdparm` option to bypass `hdparm` checks for drive serial and model numbers. This is useful for drives that do not support `hdparm` commands, such as veracrypt containers or some USB drives.
+
 ## [1.1.31] - 2025-09-19
 
 ### Fixed
@@ -333,9 +338,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- New `analyzeSmartctlOutput` helper function in `helpers/smartctl_analyzer.php` to parse and analyze `smartctl` output.
-- `view_smartctl.php` now displays a summarized analysis of `smartctl` data, including overall status and identified issues, before showing the raw output.
-- Added CSS styling for `smartctl` analysis results in `style.css`.
+- New `st_smart` table created to store `smartctl` scan results.
+- `scan_drive.php` now saves `smartctl` output for each drive scan into the `st_smart` table.
+- "Smartctl" action added to `drives.php` to display `smartctl` data for a drive.
 
 ## [1.0.5] - 2025-08-23
 
