@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.33] - 2025-11-18
+
+### Performance
+- **Database Optimization**: Added composite indexes to dramatically improve `drives.php` page load performance with large datasets (6.7M+ file records).
+  - Added `idx_files_drive_deleted_size` index on `st_files(drive_id, date_deleted, size)` to optimize the used space calculation query.
+  - Added `idx_scans_drive_date` index on `st_scans(drive_id, scan_date)` to optimize the last scan date query.
+  - Result: Reduced page load time from 30+ seconds to ~2 seconds (93% improvement).
+  - Run `php run_optimization.php` to apply these indexes to existing installations.
+
+### Changed
+- Database schema version bumped to 1.0.7 to reflect new indexes.
+
 ## [1.1.32] - 2025-10-05
 
 ### Added

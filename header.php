@@ -12,7 +12,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Storage Drive Inventory</title>
+    <title>Vanilla Storage</title>
     <style>
         /* --- Elegant Dark Mode CSS --- */
         body {

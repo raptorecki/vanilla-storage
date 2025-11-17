@@ -1,9 +1,9 @@
 /*M!999999\- enable the sandbox mode */ 
--- MariaDB dump 10.19  Distrib 10.11.11-MariaDB, for debian-linux-gnu (aarch64)
+-- MariaDB dump 10.19  Distrib 10.11.14-MariaDB, for debian-linux-gnu (aarch64)
 --
 -- Host: localhost    Database: storage
 -- ------------------------------------------------------
--- Server version	10.11.11-MariaDB-0+deb12u1-log
+-- Server version	10.11.14-MariaDB-0+deb12u2-log
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -47,7 +47,7 @@ CREATE TABLE `st_drives` (
   `filesystem` varchar(50) DEFAULT NULL COMMENT 'Filesystem of the drive (e.g., ext4, ntfs, apfs)',
   PRIMARY KEY (`id`),
   KEY `pair_id_idx` (`pair_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=98 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=99 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -91,9 +91,10 @@ CREATE TABLE `st_files` (
   KEY `drive_id` (`drive_id`),
   KEY `md5_hash_idx` (`md5_hash`),
   KEY `fk_last_scan` (`last_scan_id`),
+  KEY `idx_files_drive_deleted_size` (`drive_id`,`date_deleted`,`size`),
   CONSTRAINT `fk_last_scan` FOREIGN KEY (`last_scan_id`) REFERENCES `st_scans` (`scan_id`) ON DELETE SET NULL,
   CONSTRAINT `st_files_drive_id_fk` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=1746446 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6830854 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -125,7 +126,7 @@ CREATE TABLE `st_recovery` (
   KEY `idx_scan_id` (`scan_id`),
   CONSTRAINT `st_recovery_ibfk_1` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE,
   CONSTRAINT `st_recovery_ibfk_2` FOREIGN KEY (`scan_id`) REFERENCES `st_scans` (`scan_id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=46 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -157,8 +158,9 @@ CREATE TABLE `st_scans` (
   `eta_calculated_at` datetime DEFAULT NULL,
   PRIMARY KEY (`scan_id`),
   KEY `drive_id` (`drive_id`),
+  KEY `idx_scans_drive_date` (`drive_id`,`scan_date`),
   CONSTRAINT `st_scans_ibfk_1` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=59 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=114 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -176,7 +178,7 @@ CREATE TABLE `st_smart` (
   PRIMARY KEY (`id`),
   KEY `drive_id` (`drive_id`),
   CONSTRAINT `st_smart_ibfk_1` FOREIGN KEY (`drive_id`) REFERENCES `st_drives` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=136 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=243 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -200,4 +202,4 @@ CREATE TABLE `st_version` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-09-10  3:11:35
+-- Dump completed on 2025-11-18  0:40:38

@@ -1,3 +1,4 @@
+CLAUDE.md
 GEMINI.md
 config.php
 composer.phar
@@ -10,3 +11,6 @@ logs/
 thumbnails/
 *.sql
 thumb_test.php
+migrate_to_1.0.7.php
+optimize_drives_indexes.sql
+run_optimization.php
