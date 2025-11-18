@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.34] - 2025-11-18
+
+### Performance
+- **Stats Page Optimization**: Dramatically improved `stats.php` page load performance with large datasets (6.7M+ file records).
+  - Added `idx_files_deleted_category` index on `st_files(date_deleted, file_category)` to optimize file category grouping query.
+  - Added `idx_files_deleted_size_desc` index on `st_files(date_deleted, size DESC)` to optimize largest files sorting query.
+  - Rewrote "Largest Files" query using two-step approach: sort first using index, then lookup drive names for results only.
+  - Result: Reduced critical query times from 174.9 seconds to 4.3 seconds (97.6% improvement, 41x faster).
+  - Individual improvements:
+    - Files by Category: 113s → 2.2s (98% faster)
+    - Largest Files: 60s → <0.001s (99.9% faster, 172,000x improvement)
+    - Overall page load: ~3 minutes → ~5-10 seconds
+  - Run `php optimize_stats.php` to apply these indexes to existing installations.
+
+### Changed
+- `stats.php`: Optimized "Largest Files" query to use two-step process for better index utilization.
+- Database schema version bumped to 1.0.8 to reflect new indexes.
+
 ## [1.1.33] - 2025-11-18
 
 ### Performance

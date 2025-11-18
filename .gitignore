@@ -14,3 +14,11 @@ thumb_test.php
 migrate_to_1.0.7.php
 optimize_drives_indexes.sql
 run_optimization.php
+STATS_OPTIMIZATION_SUMMARY.md
+test_stats_improvement.php
+optimize_stats.php
+final_stats_verification.php
+test_largest_files_optimized.php
+OPTIMIZATION_COMPLETE.md
+analyze_stats_performance.php
+migrate_to_1.0.8.php

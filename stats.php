@@ -65,25 +65,40 @@ try {
         ORDER BY file_count DESC
     ")->fetchAll();
 
-    // 4. Get the N largest files
+    // 4. Get the N largest files (optimized two-step query)
+    // Step 1: Get largest files using size index (fast)
     $stmt = $pdo->prepare("
         SELECT
-            f.path,
-            f.size,
-            f.drive_id,
-            d.name AS drive_name
+            id,
+            path,
+            size,
+            drive_id
         FROM
-            st_files AS f
-        JOIN
-            st_drives AS d ON f.drive_id = d.id
-        WHERE f.date_deleted IS NULL
+            st_files
+        WHERE date_deleted IS NULL
         ORDER BY
-            f.size DESC
+            size DESC
         LIMIT :limit
     ");
     $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
     $stmt->execute();
-    $stats['largest_files'] = $stmt->fetchAll();
+    $largest_files = $stmt->fetchAll();
+
+    // Step 2: Get drive names for only these N files (fast lookup)
+    if (!empty($largest_files)) {
+        $drive_ids = array_unique(array_column($largest_files, 'drive_id'));
+        $placeholders = str_repeat('?,', count($drive_ids) - 1) . '?';
+        $stmt = $pdo->prepare("SELECT id, name FROM st_drives WHERE id IN ($placeholders)");
+        $stmt->execute(array_values($drive_ids));
+        $drive_names = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
+        // Merge drive names into results
+        foreach ($largest_files as &$file) {
+            $file['drive_name'] = $drive_names[$file['drive_id']] ?? 'Unknown';
+        }
+        unset($file); // Break reference
+    }
+    $stats['largest_files'] = $largest_files;
 
     // 5. Get drive usage stats for free space calculation
     $drive_usage_query = "
