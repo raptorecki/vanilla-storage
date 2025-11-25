@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.36] - 2025-11-25
+
+### Added
+- **Dedicated Duplicate Files Page**: Created `duplicates.php` with full-featured duplicate file browser.
+  - Pagination support (20 items per page, max 1000 pages).
+  - Filters: minimum instances (2+, 3+, 4+, 5+, 10+).
+  - Sorting options: wasted space, instance count, file size, filename.
+  - Expandable file locations with direct links to browse.php.
+  - Query timeout protection with helpful error messages.
+- `PERFORMANCE_SUMMARY.md`: Comprehensive documentation of all performance optimizations and current metrics.
+- Navigation link to "Duplicates" page in header.php.
+
+### Changed
+- `stats.php`: Added approximate duplicate file statistics using fast COUNT queries (replaces slow detailed duplicate list).
+  - Shows ~2.6M potential duplicates with estimated wasted space.
+  - Added link to new duplicates.php page for detailed browsing.
+- `header.php`: Added "Duplicates" navigation menu item.
+
+### Fixed
+- File permissions on duplicates.php corrected to 664 (was 600, preventing web server access).
+
 ## [1.1.35] - 2025-11-25
 
 ### Performance

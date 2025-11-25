@@ -300,6 +300,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <a href="index.php" class="<?= $current_page == 'index.php' ? 'active' : '' ?>">Home</a>
     <a href="drives.php" class="<?= $current_page == 'drives.php' ? 'active' : '' ?>">Drives</a>
     <a href="files.php" class="<?= $current_page == 'files.php' ? 'active' : '' ?>">Files</a>
+    <a href="duplicates.php" class="<?= $current_page == 'duplicates.php' ? 'active' : '' ?>">Duplicates</a>
     <a href="scans.php" class="<?= $current_page == 'scans.php' ? 'active' : '' ?>">Scans</a>
     <a href="stats.php" class="<?= $current_page == 'stats.php' ? 'active' : '' ?>">Stats</a>
     <a href="import_csv.php" class="<?= $current_page == 'import_csv.php' ? 'active' : '' ?>">Import</a>

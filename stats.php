@@ -155,10 +155,50 @@ try {
     // 7. Get count of drives with completed scans
     $stats['drives_scanned_completed'] = $pdo->query("SELECT COUNT(DISTINCT drive_id) FROM st_scans WHERE status = 'completed'")->fetchColumn();
 
-    // 8. Get duplicate files (files with same MD5 hash across drives or within same drive)
-    // PERFORMANCE NOTE: These queries are EXTREMELY slow with large datasets (180+ seconds with 7.2M files)
-    // TODO: Implement caching or move to separate async page
-    /* TEMPORARILY DISABLED FOR PERFORMANCE
+    // 8. Get duplicate file STATISTICS (fast summary without detailed list)
+    // Full duplicate detection with detailed file list is available on separate duplicates page
+    try {
+        $duplicate_stats = prepare_with_timeout($pdo, "
+            SELECT
+                COUNT(*) as total_files_with_hash,
+                COUNT(DISTINCT md5_hash) as unique_hashes
+            FROM st_files
+            WHERE date_deleted IS NULL
+                AND md5_hash IS NOT NULL
+                AND md5_hash != ''
+        ", [], 30)->fetch();
+
+        if ($duplicate_stats) {
+            // Approximate duplicate count: total files with hash - unique hashes
+            $potential_duplicates = $duplicate_stats['total_files_with_hash'] - $duplicate_stats['unique_hashes'];
+            $stats['total_duplicates'] = max(0, $potential_duplicates);
+
+            // Estimate wasted space (rough approximation)
+            // This is faster than calculating exact wasted space
+            if ($potential_duplicates > 0) {
+                $avg_size = prepare_with_timeout($pdo, "
+                    SELECT AVG(size) as avg_size
+                    FROM st_files
+                    WHERE date_deleted IS NULL
+                        AND md5_hash IS NOT NULL
+                        AND md5_hash != ''
+                ", [], 30)->fetchColumn();
+                $stats['total_wasted_space'] = $potential_duplicates * $avg_size;
+            }
+        }
+    } catch (\PDOException $e) {
+        log_error("Duplicate stats query error: " . $e->getMessage());
+        $stats['total_duplicates'] = 0;
+        $stats['total_wasted_space'] = 0;
+    }
+
+    // Empty array for duplicate_files since we're not showing detailed list on this page
+    $stats['duplicate_files'] = [];
+
+    // 9. Get duplicate files (files with same MD5 hash across drives or within same drive)
+    // PERFORMANCE NOTE: Detailed duplicate queries are EXTREMELY slow with large datasets (180+ seconds with 7.2M files)
+    // TODO: Implement separate duplicates.php page with pagination
+    /* DISABLED - Use duplicates.php page instead
     $stmt = $pdo->prepare("
         SELECT
             f.md5_hash,
@@ -283,6 +323,23 @@ try {
 
     <details>
         <summary><h2>Duplicate Files</h2></summary>
+        <?php if ($stats['total_duplicates'] > 0): ?>
+            <p style="margin-bottom: 15px; background-color: #2a2a2a; padding: 15px; border-radius: 5px; border-left: 4px solid #3a7ab8;">
+                <strong>Summary Statistics:</strong><br>
+                • Approximate duplicate file instances: <?= number_format($stats['total_duplicates']) ?><br>
+                • Estimated wasted space: <?= formatBytes((int)$stats['total_wasted_space']) ?><br>
+                <br>
+                <a href="duplicates.php" style="display: inline-block; margin-top: 10px; padding: 10px 20px; background-color: #3a7ab8; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                    View Detailed Duplicate Files →
+                </a>
+                <br><br>
+                <em style="font-size: 0.9em;">Note: Detailed duplicate file browsing is available on the dedicated Duplicates page with pagination for better performance.</em>
+            </p>
+        <?php elseif ($stats['total_duplicates'] == 0): ?>
+            <p>No duplicate files found. All files have unique content (based on MD5 hash).</p>
+        <?php endif; ?>
+
+        <?php if (false): // Disabled detailed duplicate list ?>
         <div class="table-toolbar">
             <form action="stats.php" method="get">
                 <label for="duplicate_limit">Show:</label>
@@ -293,9 +350,7 @@ try {
                 </select>
             </form>
         </div>
-        <?php if (empty($stats['duplicate_files'])): ?>
-            <p>No duplicate files found. All files have unique content (based on MD5 hash).</p>
-        <?php else: ?>
+        <?php if (!empty($stats['duplicate_files'])): ?>
             <p style="margin-bottom: 15px;">
                 <strong>Summary:</strong> Found <?= number_format($stats['total_duplicates']) ?> groups of duplicate files.
                 Removing duplicates could free up <?= formatBytes((int)$stats['total_wasted_space']) ?> of storage space.
@@ -348,6 +403,7 @@ try {
                 </tbody>
             </table>
         <?php endif; ?>
+        <?php endif; // End of if (false) - disabled detailed duplicate list ?>
     </details>
 
     <details>
