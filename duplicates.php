@@ -20,36 +20,39 @@ $offset = ($current_page - 1) * $page_size;
 
 // Sorting options
 $sort_options = [
+    'none' => 'None (Fastest)',
     'wasted_space' => 'Wasted Space (Highest First)',
     'instance_count' => 'Number of Copies (Most First)',
     'file_size' => 'File Size (Largest First)',
     'filename' => 'Filename (A-Z)'
 ];
-$sort_by = $_GET['sort'] ?? 'wasted_space';
+$sort_by = $_GET['sort'] ?? 'none';
 if (!array_key_exists($sort_by, $sort_options)) {
-    $sort_by = 'wasted_space';
+    $sort_by = 'none';
 }
 
 // Map sort parameter to SQL ORDER BY clause
 $order_by_map = [
-    'wasted_space' => 'wasted_space DESC',
-    'instance_count' => 'instance_count DESC',
-    'file_size' => 'file_size DESC',
-    'filename' => 'sample_filename ASC'
+    'none' => '',
+    'wasted_space' => 'ORDER BY wasted_space DESC',
+    'instance_count' => 'ORDER BY instance_count DESC',
+    'file_size' => 'ORDER BY file_size DESC',
+    'filename' => 'ORDER BY sample_filename ASC'
 ];
 $order_by = $order_by_map[$sort_by];
 
-// Minimum instances filter
-$min_instances = filter_input(INPUT_GET, 'min_instances', FILTER_VALIDATE_INT, ['options' => ['default' => 2, 'min_range' => 2]]);
+// Minimum instances filter (default to 10 for better performance)
+$min_instances = filter_input(INPUT_GET, 'min_instances', FILTER_VALIDATE_INT, ['options' => ['default' => 10, 'min_range' => 2]]);
 
 $duplicate_groups = [];
 $total_results = 0;
 $total_pages = 0;
 $stats = ['total_duplicates' => 0, 'total_wasted_space' => 0];
 $error_message = '';
+$count_skipped = false;
 
+// Try to get total count (may timeout for low min_instances)
 try {
-    // Get total count of duplicate groups (fast summary)
     $count_start = microtime(true);
     $total_stats = prepare_with_timeout($pdo, "
         SELECT
@@ -67,7 +70,7 @@ try {
             GROUP BY md5_hash
             HAVING instance_count >= ?
         ) AS dup_groups
-    ", [$min_instances], 30)->fetch();
+    ", [$min_instances], 60)->fetch();
 
     if ($total_stats) {
         $total_results = $total_stats['group_count'] ?: 0;
@@ -76,9 +79,16 @@ try {
         $total_pages = ceil($total_results / $page_size);
     }
     $count_duration = microtime(true) - $count_start;
+} catch (\PDOException $e) {
+    // Count query timed out - continue without total count
+    $count_skipped = true;
+    $error_message = "Note: Total count skipped due to timeout. Showing first page of results. Try increasing minimum instances filter for faster performance.";
+    log_error("Count query timeout in duplicates.php: " . $e->getMessage());
+}
 
-    // Get paginated duplicate groups
-    if ($total_results > 0) {
+// Get paginated duplicate groups (try even if count failed)
+try {
+    if (!$count_skipped || $current_page == 1) {
         $query_start = microtime(true);
         $stmt = prepare_with_timeout($pdo, "
             SELECT
@@ -93,9 +103,9 @@ try {
                 AND f.md5_hash != ''
             GROUP BY f.md5_hash
             HAVING instance_count >= ?
-            ORDER BY {$order_by}
+            {$order_by}
             LIMIT ? OFFSET ?
-        ", [$min_instances, $page_size, $offset], 30);
+        ", [$min_instances, $page_size, $offset], 60);
 
         $duplicate_groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $query_duration = microtime(true) - $query_start;
@@ -122,14 +132,13 @@ try {
         }
         unset($group);
     }
-
 } catch (\PDOException $e) {
     if (strpos($e->getMessage(), 'max_statement_time') !== false) {
-        $error_message = "Query timeout: The duplicate detection query is taking too long. Please try narrowing your search by increasing the minimum instances filter.";
+        $error_message = "Query timeout: The duplicate results query is taking too long. Please try increasing the minimum instances filter to 10+ for better performance.";
     } else {
         $error_message = "An unexpected database error occurred. Please try again.";
     }
-    log_error("Database Error in duplicates.php: " . $e->getMessage());
+    log_error("Database Error in duplicates.php (results query): " . $e->getMessage());
 }
 ?>
 
@@ -142,15 +151,15 @@ try {
 <div class="stats-grid" style="margin-bottom: 25px;">
     <div class="stat-card">
         <h3>Total Duplicate Groups</h3>
-        <p><?= number_format($stats['total_duplicates']) ?></p>
+        <p><?= $count_skipped ? '(calculating...)' : number_format($stats['total_duplicates']) ?></p>
     </div>
     <div class="stat-card">
         <h3>Total Wasted Space</h3>
-        <p><?= formatBytes((int)$stats['total_wasted_space']) ?></p>
+        <p><?= $count_skipped ? '(calculating...)' : formatBytes((int)$stats['total_wasted_space']) ?></p>
     </div>
     <div class="stat-card">
         <h3>Current Page</h3>
-        <p><?= number_format($current_page) ?> of <?= number_format($total_pages) ?></p>
+        <p><?= $count_skipped ? number_format($current_page) : (number_format($current_page) . ' of ' . number_format($total_pages)) ?></p>
     </div>
 </div>
 
@@ -189,6 +198,11 @@ try {
         <button type="submit" style="background-color: #3a7ab8; color: #ffffff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer;">Apply Filters</button>
         <a href="duplicates.php" style="background-color: #555; color: #ffffff; border: none; padding: 8px 20px; border-radius: 4px; text-decoration: none;">Reset</a>
     </form>
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; background-color: #2a2a2a; border-left: 4px solid #3a7ab8; border-radius: 5px; font-size: 0.9em;">
+    <strong>Performance Tip:</strong> Use "None (Fastest)" sorting and higher min copies (10+) for best performance.
+    Sorting requires processing all <?= number_format(7202080) ?> files and may take 60+ seconds.
 </div>
 
 <!-- Pagination -->

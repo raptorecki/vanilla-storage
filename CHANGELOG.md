@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.37] - 2025-11-25
+
+### Performance
+- **duplicates.php Optimization**: Resolved query timeout issues preventing duplicate file browsing.
+  - Changed default min_instances from 2 to 10 for significantly faster queries.
+  - Added "None (Fastest)" as default sorting option - removes expensive ORDER BY clause.
+  - Query performance: ~3-5 seconds without sorting vs 60+ seconds with sorting.
+  - Made count query non-fatal - page shows results even if total count times out.
+  - Increased query timeout from 30s to 60s for sorted queries.
+
+### Changed
+- `duplicates.php`: Sorting is now optional with "None (Fastest)" as default.
+- `duplicates.php`: Default minimum instances increased to 10+ for better performance.
+- `duplicates.php`: Statistics display "(calculating...)" when count query times out.
+
+### Added
+- `duplicates.php`: Performance tip banner explaining trade-offs between speed and sorting.
+
 ## [1.1.36] - 2025-11-25
 
 ### Added
