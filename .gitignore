@@ -22,3 +22,12 @@ test_largest_files_optimized.php
 OPTIMIZATION_COMPLETE.md
 analyze_stats_performance.php
 migrate_to_1.0.8.php
+add_duplicate_detection_index.php
+add_index_with_timeout.php
+test_duplicates.php
+test_duplicate_performance.php
+test_stats_performance.php
+TODO.md
+profile_stats_queries.php
+DATABASE_BLOCKING_FIXES.md
+.claude

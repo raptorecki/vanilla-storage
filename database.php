@@ -64,3 +64,48 @@ try {
         }
     }
 }
+
+/**
+ * Execute a query with a timeout to prevent database blocking
+ *
+ * @param PDO $pdo PDO connection
+ * @param string $sql SQL query
+ * @param int $timeout_seconds Maximum execution time in seconds (default: 30)
+ * @return PDOStatement
+ * @throws PDOException if query fails or times out
+ */
+function query_with_timeout($pdo, $sql, $timeout_seconds = 30) {
+    // Set statement timeout for this session
+    $pdo->exec("SET SESSION max_statement_time = " . intval($timeout_seconds));
+
+    try {
+        $stmt = $pdo->query($sql);
+        return $stmt;
+    } finally {
+        // Reset timeout to default (0 = no limit)
+        $pdo->exec("SET SESSION max_statement_time = 0");
+    }
+}
+
+/**
+ * Prepare and execute a query with timeout
+ *
+ * @param PDO $pdo PDO connection
+ * @param string $sql SQL query with placeholders
+ * @param array $params Parameters to bind
+ * @param int $timeout_seconds Maximum execution time in seconds (default: 30)
+ * @return PDOStatement
+ */
+function prepare_with_timeout($pdo, $sql, $params = [], $timeout_seconds = 30) {
+    // Set statement timeout for this session
+    $pdo->exec("SET SESSION max_statement_time = " . intval($timeout_seconds));
+
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt;
+    } finally {
+        // Reset timeout to default (0 = no limit)
+        $pdo->exec("SET SESSION max_statement_time = 0");
+    }
+}

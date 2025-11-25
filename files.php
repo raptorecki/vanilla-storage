@@ -95,7 +95,23 @@ if (!$page_size || !in_array($page_size, $allowed_page_sizes)) {
 }
 
 $current_page = filter_input(INPUT_GET, 'page', FILTER_VALIDATE_INT, ['options' => ['default' => 1, 'min_range' => 1]]);
+
+// PERFORMANCE LIMIT: Cap maximum page to prevent slow deep pagination
+// With 7.2M files, OFFSET beyond 100K becomes extremely slow
+$max_page = 5000; // Allow up to page 5000 (100K results with page_size=20)
+if ($current_page > $max_page) {
+    $current_page = $max_page;
+}
+
 $offset = ($current_page - 1) * $page_size;
+
+// PERFORMANCE LIMIT: Cap maximum offset to prevent database lockups
+// OFFSET pagination gets exponentially slower with large offsets
+$max_offset = 100000; // Maximum 100K offset
+if ($offset > $max_offset) {
+    $offset = $max_offset;
+    $current_page = floor($max_offset / $page_size) + 1;
+}
 
 $is_search_active = !empty(array_filter($search_params));
 
@@ -176,12 +192,24 @@ try {
         $total_pages = ceil($total_results / $page_size);
 
         // Get the actual results for the current page
+        // Use 30-second timeout to prevent database lockups
         $sql = "SELECT f.*, d.name as drive_name FROM st_files f JOIN st_drives d ON f.drive_id = d.id WHERE $where_sql ORDER BY f.mtime DESC LIMIT ? OFFSET ?";
         $params[] = $page_size;
         $params[] = $offset;
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $files = $stmt->fetchAll();
+
+        try {
+            $stmt = prepare_with_timeout($pdo, $sql, $params, 30);
+            $files = $stmt->fetchAll();
+        } catch (\PDOException $e) {
+            // Check if timeout error
+            if (strpos($e->getMessage(), 'max_statement_time') !== false) {
+                $error_message = "Query timeout: This search is taking too long. Please narrow your search criteria or try a different page.";
+                log_error("Query timeout in files.php: " . $e->getMessage());
+                $files = [];
+            } else {
+                throw $e; // Re-throw other errors
+            }
+        }
     }
 } catch (\PDOException $e) {
     $error_message = "An unexpected error occurred while searching for files. Please try again.";

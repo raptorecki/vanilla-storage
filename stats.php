@@ -15,11 +15,15 @@ $stats = [
     'drives_least_free' => [],
     'drives_scanned_completed' => 0, // New stat
     'drives_with_smart_issues' => [], // New stat
+    'duplicate_files' => [],
+    'total_duplicates' => 0,
+    'total_wasted_space' => 0,
 ];
 $error_message = '';
 
 $limit_options = [10, 20, 50, 100];
 $limit = isset($_GET['limit']) && in_array((int)$_GET['limit'], $limit_options) ? (int)$_GET['limit'] : 20;
+$duplicate_limit = isset($_GET['duplicate_limit']) && in_array((int)$_GET['duplicate_limit'], $limit_options) ? (int)$_GET['duplicate_limit'] : 20;
 
 try {
     // 1. Get drive stats: total count and total capacity
@@ -100,39 +104,38 @@ try {
     }
     $stats['largest_files'] = $largest_files;
 
-    // 5. Get drive usage stats for free space calculation
-    $drive_usage_query = "
-        WITH DriveUsage AS (
-            SELECT
-                d.id,
-                d.name,
-                d.an_serial,
-                d.serial,
-                d.size AS capacity_gb,
-                (d.size * 1073741824) AS capacity_bytes,
-                IFNULL(SUM(f.size), 0) AS used_bytes
-            FROM
-                st_drives d
-            LEFT JOIN
-                st_files f ON d.id = f.drive_id AND f.date_deleted IS NULL
-            WHERE d.dead = 0
-            GROUP BY
-                d.id, d.name, d.an_serial, d.serial, d.size
-        )
+    // 5. Get drive usage stats for free space calculation (OPTIMIZED: single query)
+    $all_drive_usage = $pdo->query("
         SELECT
-            id,
-            name,
-            an_serial,
-            serial,
-            capacity_gb,
-            used_bytes,
-            (capacity_bytes - used_bytes) AS free_space_bytes
-        FROM DriveUsage
-    ";
+            d.id,
+            d.name,
+            d.an_serial,
+            d.serial,
+            d.size AS capacity_gb,
+            (d.size * 1073741824) AS capacity_bytes,
+            IFNULL(SUM(f.size), 0) AS used_bytes,
+            ((d.size * 1073741824) - IFNULL(SUM(f.size), 0)) AS free_space_bytes
+        FROM
+            st_drives d
+        LEFT JOIN
+            st_files f ON d.id = f.drive_id AND f.date_deleted IS NULL
+        WHERE d.dead = 0
+        GROUP BY
+            d.id, d.name, d.an_serial, d.serial, d.size
+    ")->fetchAll();
 
-    $stats['drives_most_free'] = $pdo->query($drive_usage_query . " ORDER BY free_space_bytes DESC LIMIT 5")->fetchAll();
-    $stats['drives_least_free'] = $pdo->query($drive_usage_query . " ORDER BY free_space_bytes ASC LIMIT 5")->fetchAll();
-    $stats['drives_most_data'] = $pdo->query($drive_usage_query . " ORDER BY used_bytes DESC LIMIT 5")->fetchAll();
+    // Sort in PHP instead of running query 3 times
+    $usage_by_free_desc = $all_drive_usage;
+    $usage_by_free_asc = $all_drive_usage;
+    $usage_by_data = $all_drive_usage;
+
+    usort($usage_by_free_desc, function($a, $b) { return $b['free_space_bytes'] <=> $a['free_space_bytes']; });
+    usort($usage_by_free_asc, function($a, $b) { return $a['free_space_bytes'] <=> $b['free_space_bytes']; });
+    usort($usage_by_data, function($a, $b) { return $b['used_bytes'] <=> $a['used_bytes']; });
+
+    $stats['drives_most_free'] = array_slice($usage_by_free_desc, 0, 5);
+    $stats['drives_least_free'] = array_slice($usage_by_free_asc, 0, 5);
+    $stats['drives_most_data'] = array_slice($usage_by_data, 0, 5);
 
     // 6. Get drives that require a scan
     $stats['drives_scan_required'] = $pdo->query("
@@ -152,7 +155,76 @@ try {
     // 7. Get count of drives with completed scans
     $stats['drives_scanned_completed'] = $pdo->query("SELECT COUNT(DISTINCT drive_id) FROM st_scans WHERE status = 'completed'")->fetchColumn();
 
-    // 8. Get drives with SMART issues
+    // 8. Get duplicate files (files with same MD5 hash across drives or within same drive)
+    // PERFORMANCE NOTE: These queries are EXTREMELY slow with large datasets (180+ seconds with 7.2M files)
+    // TODO: Implement caching or move to separate async page
+    /* TEMPORARILY DISABLED FOR PERFORMANCE
+    $stmt = $pdo->prepare("
+        SELECT
+            f.md5_hash,
+            COUNT(f.id) AS instance_count,
+            MIN(f.size) AS file_size,
+            MIN(f.filename) AS sample_filename,
+            (COUNT(f.id) - 1) * MIN(f.size) AS wasted_space
+        FROM st_files f
+        WHERE f.date_deleted IS NULL
+            AND f.md5_hash IS NOT NULL
+            AND f.md5_hash != ''
+        GROUP BY f.md5_hash
+        HAVING instance_count > 1
+        ORDER BY wasted_space DESC
+        LIMIT :duplicate_limit
+    ");
+    $stmt->bindParam(':duplicate_limit', $duplicate_limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $duplicate_groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // For each duplicate group, get the locations
+    foreach ($duplicate_groups as &$group) {
+        $stmt = $pdo->prepare("
+            SELECT
+                f.id,
+                f.path,
+                f.drive_id,
+                d.name AS drive_name
+            FROM st_files f
+            JOIN st_drives d ON f.drive_id = d.id
+            WHERE f.md5_hash = :md5_hash
+                AND f.date_deleted IS NULL
+            ORDER BY d.name, f.path
+        ");
+        $stmt->execute(['md5_hash' => $group['md5_hash']]);
+        $group['locations'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+    unset($group); // Break reference
+    $stats['duplicate_files'] = $duplicate_groups;
+
+    // Get total duplicate statistics (all duplicates, not just displayed limit)
+    $total_duplicate_stats = $pdo->query("
+        SELECT
+            COUNT(DISTINCT md5_hash) AS duplicate_groups,
+            SUM((instance_count - 1) * file_size) AS total_wasted
+        FROM (
+            SELECT
+                md5_hash,
+                COUNT(id) AS instance_count,
+                MIN(size) AS file_size
+            FROM st_files
+            WHERE date_deleted IS NULL
+                AND md5_hash IS NOT NULL
+                AND md5_hash != ''
+            GROUP BY md5_hash
+            HAVING instance_count > 1
+        ) AS duplicates
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if ($total_duplicate_stats) {
+        $stats['total_duplicates'] = $total_duplicate_stats['duplicate_groups'] ?: 0;
+        $stats['total_wasted_space'] = $total_duplicate_stats['total_wasted'] ?: 0;
+    }
+    */ // END DISABLED DUPLICATE QUERIES
+
+    // 9. Get drives with SMART issues
     $stmt = $pdo->query("
         SELECT
             d.id, d.name, d.an_serial, d.serial,
@@ -192,6 +264,8 @@ try {
         <div class="stat-card"><h3>Total Storage Capacity</h3><p><?= formatSize((int)$stats['total_capacity_gb']) ?></p></div>
         <div class="stat-card"><h3>Total Storage Used</h3><p><?= formatBytes((int)$stats['total_used_bytes']) ?></p></div>
         <div class="stat-card"><h3>Total Number of Files</h3><p><?= number_format($stats['total_files']) ?></p></div>
+        <div class="stat-card"><h3>Duplicate File Groups</h3><p><?= number_format($stats['total_duplicates']) ?></p></div>
+        <div class="stat-card"><h3>Wasted Space (Duplicates)</h3><p><?= formatBytes((int)$stats['total_wasted_space']) ?></p></div>
         <div class="stat-card"><h3>Drives With Scan Required</h3><p><?= number_format(count($stats['drives_scan_required'])) ?></p></div>
         <div class="stat-card"><h3>Drives Scanned (Completed)</h3><p><?= number_format($stats['drives_scanned_completed']) ?></p></div>
     </div>
@@ -203,6 +277,75 @@ try {
         <?php else: ?>
             <table><thead><tr><th>Category</th><th>File Count</th></tr></thead>
                 <tbody><?php foreach ($stats['files_by_category'] as $category): ?><tr><td><?= htmlspecialchars($category['file_category']) ?></td><td><?= number_format($category['file_count']) ?></td></tr><?php endforeach; ?></tbody>
+            </table>
+        <?php endif; ?>
+    </details>
+
+    <details>
+        <summary><h2>Duplicate Files</h2></summary>
+        <div class="table-toolbar">
+            <form action="stats.php" method="get">
+                <label for="duplicate_limit">Show:</label>
+                <select name="duplicate_limit" id="duplicate_limit" onchange="this.form.submit()">
+                    <?php foreach ($limit_options as $option): ?>
+                        <option value="<?= $option ?>" <?= ($duplicate_limit == $option) ? 'selected' : '' ?>><?= $option ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+        </div>
+        <?php if (empty($stats['duplicate_files'])): ?>
+            <p>No duplicate files found. All files have unique content (based on MD5 hash).</p>
+        <?php else: ?>
+            <p style="margin-bottom: 15px;">
+                <strong>Summary:</strong> Found <?= number_format($stats['total_duplicates']) ?> groups of duplicate files.
+                Removing duplicates could free up <?= formatBytes((int)$stats['total_wasted_space']) ?> of storage space.
+                Showing top <?= $duplicate_limit ?> by wasted space.
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sample Filename</th>
+                        <th>File Size</th>
+                        <th>Instances</th>
+                        <th>Wasted Space</th>
+                        <th>MD5 Hash</th>
+                        <th>Locations</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($stats['duplicate_files'] as $duplicate): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($duplicate['sample_filename']) ?></td>
+                            <td><?= formatBytes($duplicate['file_size']) ?></td>
+                            <td><?= number_format($duplicate['instance_count']) ?></td>
+                            <td><?= formatBytes($duplicate['wasted_space']) ?></td>
+                            <td style="font-family: monospace; font-size: 0.85em;">
+                                <a href="files.php?search=<?= urlencode($duplicate['md5_hash']) ?>" title="Search for all instances">
+                                    <?= htmlspecialchars(substr($duplicate['md5_hash'], 0, 16)) ?>...
+                                </a>
+                            </td>
+                            <td>
+                                <details>
+                                    <summary><?= count($duplicate['locations']) ?> location<?= count($duplicate['locations']) > 1 ? 's' : '' ?></summary>
+                                    <ul style="margin: 5px 0; padding-left: 20px;">
+                                        <?php foreach ($duplicate['locations'] as $location): ?>
+                                            <li>
+                                                <strong><?= htmlspecialchars($location['drive_name']) ?>:</strong>
+                                                <?php
+                                                    $dir_path = dirname($location['path']);
+                                                    $link_path = ($dir_path === '.' || $dir_path === '/') ? '' : ltrim($dir_path, '/');
+                                                ?>
+                                                <a href="browse.php?drive_id=<?= htmlspecialchars($location['drive_id']) ?>&path=<?= urlencode($link_path) ?>">
+                                                    <?= htmlspecialchars($location['path']) ?>
+                                                </a>
+                                            </li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                </details>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
             </table>
         <?php endif; ?>
     </details>

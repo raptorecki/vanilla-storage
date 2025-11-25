@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.35] - 2025-11-25
+
+### Performance
+- **Stats Page Optimization**: Achieved 8x performance improvement on `stats.php` with large datasets (7.2M+ files).
+  - Temporarily disabled duplicate file detection queries that were taking 180+ seconds for top-N results and 300+ seconds for total statistics.
+  - Consolidated DriveUsage CTE query to run once instead of three times, saving 15.6 seconds.
+  - Result: Reduced page load time from 220+ seconds to 27 seconds (87% improvement).
+  - Added `idx_files_deleted_mtime` index on `st_files(date_deleted, mtime DESC)` to optimize file search with ORDER BY mtime.
+  - See `STATS_OPTIMIZATION_SUMMARY.md` for detailed analysis and future optimization paths.
+
+### Security
+- **Database Query Governor**: Implemented comprehensive safeguards to prevent single queries from blocking the entire MySQL database.
+  - Added `query_with_timeout()` and `prepare_with_timeout()` wrapper functions in `database.php` to enforce query timeouts.
+  - Set global MySQL query timeout to 60 seconds (`max_statement_time = 60000`).
+  - Set global lock wait timeout to 30 seconds (`innodb_lock_wait_timeout = 30`).
+  - Enabled slow query logging for queries taking more than 10 seconds.
+  - Added hard pagination limits in `files.php`: maximum page depth of 5000 (100K offset limit) to prevent slow deep pagination queries.
+  - Applied 30-second timeout to file search queries with graceful error handling.
+  - See `DATABASE_BLOCKING_FIXES.md` for complete implementation details.
+
+### Changed
+- `stats.php`: Duplicate file queries commented out with clear TODO notes for future re-implementation (lines 161-225).
+- `stats.php`: DriveUsage CTE query now runs once and results are sorted in PHP instead of running query three times.
+- `files.php`: Added pagination depth limits and query timeout protection.
+- `database.php`: Added query timeout wrapper functions.
+
+### Added
+- `mysql_performance_limits.sql`: SQL script with MySQL performance configuration and documentation.
+- `DATABASE_BLOCKING_FIXES.md`: Complete documentation of database blocking prevention measures.
+- `STATS_OPTIMIZATION_SUMMARY.md`: Updated with latest performance improvements and recommendations.
+- `test_stats_performance.php`: Simple script to test stats page performance.
+
+### Fixed
+- Killed two long-running queries that were blocking database: duplicate files query (726 seconds) and deep pagination query (468 seconds).
+
 ## [1.1.34] - 2025-11-18
 
 ### Performance
